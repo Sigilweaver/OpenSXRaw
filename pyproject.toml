@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "opensxraw"
+description = "Python bindings for the OpenSXRaw SCIEX .wiff / .wiff.scan file parser"
+keywords = ["mass-spectrometry", "sciex", "wiff", "raw", "proteomics"]
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Nathan Riley", email = "git@nathanriley.com" }]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "crates/opensxraw-py/Cargo.toml"
+include = [
+    { path = "LICENSE", format = "sdist" },
+    { path = "README.md", format = "sdist" },
+    { path = "README.md", format = "wheel" },
+]
+
+[project.urls]
+Homepage = "https://sigilweaver.app/opensxraw/"
+Documentation = "https://sigilweaver.app/opensxraw/docs/"
+Source = "https://github.com/Sigilweaver/OpenSXRaw"
+Issues = "https://github.com/Sigilweaver/OpenSXRaw/issues"

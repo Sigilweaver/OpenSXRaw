@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: "OpenSXRaw: A pure-Rust reader for SCIEX .wiff / .wiff2 mass-spectrometry files"
+message: >
+  If you use OpenSXRaw in your research, please cite it using the metadata
+  below. Citation is encouraged and appreciated but not legally required.
+type: software
+authors:
+  - family-names: Riley
+    given-names: Nathan
+    orcid: "https://orcid.org/0009-0004-1579-7312"
+    website: "https://github.com/Sigilweaver"
+repository-code: "https://github.com/Sigilweaver/OpenSXRaw"
+url: "https://sigilweaver.app"
+abstract: >
+  OpenSXRaw is a standalone, cross-platform reader for SCIEX .wiff /
+  .wiff.scan mass-spectrometry data files, implemented in pure Rust with
+  no dependency on SCIEX SDKs or software. It covers the legacy
+  .wiff/.wiff.scan container across TripleTOF and QTRAP instrument
+  families. The newer, self-contained .wiff2 format is investigated and
+  documented but not yet readable, since it uses proprietary encryption
+  whose key has not been recovered.
+license: "Apache-2.0"
+license-url: "https://github.com/Sigilweaver/OpenSXRaw/blob/main/LICENSE"
+version: "0.1.0"
+keywords:
+  - mass spectrometry
+  - proteomics
+  - SCIEX
+  - wiff
+  - bioinformatics
+  - Rust

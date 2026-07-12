@@ -1,0 +1,25 @@
+[package]
+name = "opensxraw"
+description = "Rust reader for SCIEX .wiff / .wiff.scan legacy mass spectrometry files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+byteorder = "1.5.0"
+cfb = "0.14.0"
+openmassspec-core = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+openmassspec-core = { workspace = true }
