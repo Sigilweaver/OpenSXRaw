@@ -1,0 +1,26 @@
+[package]
+name = "opensxraw-py"
+description = "Python bindings for the OpenSXRaw SCIEX .wiff / .wiff.scan reader."
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[lib]
+name = "opensxraw"
+crate-type = ["cdylib"]
+
+[lints.rust]
+unsafe_code = "allow"
+
+[dependencies]
+opensxraw = { workspace = true }
+openmassspec-core.workspace = true
+pyo3 = { workspace = true }

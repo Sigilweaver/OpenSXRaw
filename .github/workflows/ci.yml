@@ -1,0 +1,66 @@
+# CI for OpenSXRaw.
+#
+# Jobs:
+#   build - cargo fmt --check, cargo clippy -D warnings, cargo test
+#           (Linux + macOS via WarpBuild)
+#
+# There is no corpus-download validation job yet. The conformance tests
+# (crates/opensxraw/tests/conformance.rs) run against a real corpus fixture
+# that lives out of tree, so they skip cleanly when the corpus is absent -
+# as it is on CI. Matches the sibling readers' single-fixture stage.
+
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+
+  docs:
+    name: Docs (Docusaurus)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: bun install
+        run: bun install --frozen-lockfile
+      - name: bun run build:cloudflare
+        run: bun run build:cloudflare

@@ -1,0 +1,12 @@
+# Sandbox
+re/
+
+# Rust build artifacts
+/target/
+**/Cargo.lock
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
