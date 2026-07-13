@@ -10,9 +10,16 @@ use openmassspec_core::{
 
 use crate::raw::idx::IdxRecord;
 use crate::raw::scan::{read_scan_block, ScanPoint};
+use crate::raw::summary_info::parse_create_timestamp;
 
 /// The CFBF stream path for the scan index in a single-sample file.
 const IDX_STREAM: &str = "SampleSubtree/Sample1/Idx";
+
+/// The CFBF stream path for the standard OLE SummaryInformation property
+/// set. The leading `\x05` is the OLE convention marking a stream name as
+/// reserved/special rather than user data. See `raw::summary_info` for the
+/// investigation behind using this as the acquisition start timestamp.
+const SUMMARY_INFO_STREAM: &str = "\x05SummaryInformation";
 
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
@@ -24,6 +31,10 @@ pub struct Reader {
     pub idx_records: Vec<IdxRecord>,
     /// File size of the `.wiff.scan` file (used to bound the last block read).
     scan_file_size: u64,
+    /// Acquisition start timestamp (RFC 3339, UTC), read from the `.wiff`
+    /// container's standard OLE `SummaryInformation` property set. `None`
+    /// when that stream is absent or unparseable - see `raw::summary_info`.
+    pub start_timestamp: Option<String>,
 }
 
 impl Reader {
@@ -72,6 +83,20 @@ impl Reader {
 
         let idx_records = IdxRecord::parse_stream(&idx_data)?;
 
+        // Read the acquisition start timestamp from the standard OLE
+        // SummaryInformation property set, if present. This is optional
+        // metadata: not every `.wiff` file carries this stream (see
+        // `raw::summary_info`'s corpus survey), so any failure here just
+        // leaves `start_timestamp` as `None` rather than failing `open`.
+        let start_timestamp = comp
+            .open_stream(SUMMARY_INFO_STREAM)
+            .ok()
+            .and_then(|mut stream| {
+                let mut buf = Vec::new();
+                stream.read_to_end(&mut buf).ok()?;
+                parse_create_timestamp(&buf)
+            });
+
         let stem = wiff_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -82,6 +107,7 @@ impl Reader {
             scan_path,
             idx_records,
             scan_file_size,
+            start_timestamp,
         })
     }
 }
@@ -108,10 +134,19 @@ impl SpectrumSource for Reader {
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
             native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
+            // Still a generic placeholder, not resolved per-file: no CFBF
+            // stream was found carrying a vendor-populated instrument model
+            // string. The only candidate text (SummaryInformation's
+            // author/comments fields, CFR_INFO) is Analyst's free-text
+            // "instrument name" plus the acquisition PC's hostname, both
+            // configured per-site rather than written by the instrument
+            // firmware - see `raw::summary_info`'s module doc for the
+            // corpus evidence this isn't reliable enough to promote to a
+            // specific model term. Left as a follow-up.
             instrument: CvTerm::new("MS:1000121", "SCIEX instrument model"),
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
-            start_timestamp: None,
+            start_timestamp: self.start_timestamp.clone(),
             mobility_array_kind: None,
         }
     }
