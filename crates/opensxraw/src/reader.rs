@@ -142,7 +142,17 @@ impl SpectrumSource for Reader {
             // configured per-site rather than written by the instrument
             // firmware - see `raw::summary_info`'s module doc for the
             // corpus evidence this isn't reliable enough to promote to a
-            // specific model term. Left as a follow-up.
+            // specific model term.
+            //
+            // Issue #4 round 2 went further and enumerated every other
+            // stream in the container (DocumentSummaryInformation,
+            // FileRec_Str, VendorAppMethod, CFR/CFRFileHeader, device/method
+            // tables, and a corpus-wide model-substring scan), plus probed
+            // the binary MSConfigInfo struct for a structured instrument
+            // type field. None panned out - see `raw::summary_info`'s
+            // module doc ("Round 2") for the full list and why each was
+            // ruled out. This is confirmed investigated-and-not-resolvable
+            // from the current file structure, not just unattempted.
             instrument: CvTerm::new("MS:1000121", "SCIEX instrument model"),
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
