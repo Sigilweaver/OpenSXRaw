@@ -122,13 +122,77 @@ fn test_ms2_has_precursor() {
     let ms2: Vec<_> = spectra.iter().filter(|s| s.ms_level == 2).collect();
     assert!(!ms2.is_empty(), "expected at least one MS2 spectrum");
 
-    for s in &ms2[..ms2.len().min(5)] {
+    let mut with_selected_mz = 0;
+    for s in &ms2 {
+        let precursor = s
+            .precursor
+            .as_ref()
+            .unwrap_or_else(|| panic!("MS2 spectrum {} has no precursor", s.native_id));
         assert!(
-            s.precursor.is_some(),
-            "MS2 spectrum {} has no precursor",
+            precursor.precursor_native_id.is_some(),
+            "MS2 spectrum {} has no precursor_native_id",
+            s.native_id
+        );
+        if precursor.selected_mz.is_some() {
+            with_selected_mz += 1;
+        }
+    }
+
+    // DDERealTimeDataEx's cycle-based linkage (see `raw::dde`) resolves for
+    // every MS2 scan except ones before the file's first MS1 survey scan -
+    // a rare edge case, not the common case. Require the large majority to
+    // have a real precursor m/z rather than the "ms1ref=unknown" fallback.
+    let fraction_with_mz = with_selected_mz as f64 / ms2.len() as f64;
+    assert!(
+        fraction_with_mz > 0.9,
+        "expected >90% of MS2 spectra to have precursor selected_mz, got {:.1}% ({}/{})",
+        fraction_with_mz * 100.0,
+        with_selected_mz,
+        ms2.len()
+    );
+
+    println!(
+        "First MS2: native_id={}, {}/{} MS2 spectra have precursor selected_mz",
+        ms2[0].native_id,
+        with_selected_mz,
+        ms2.len()
+    );
+}
+
+/// Fixture: PXD056391/TO14810HD - a small TripleTOF file with a
+/// `TOFCalibrationData` stream, used to validate the calibrated m/z path
+/// (the main `Rcor2KOESC1` fixture above is QTRAP-only and has no
+/// calibration stream - see `docs/format/04-legacy-wiff-calibration.md`).
+fn calibrated_fixture_wiff() -> PathBuf {
+    PathBuf::from("/workspaces/Projects/Data/SRaw/PXD056391/TO14810HD.wiff")
+}
+
+#[test]
+fn test_calibrated_mz_is_physically_plausible() {
+    let path = calibrated_fixture_wiff();
+    if !path.exists() {
+        eprintln!("skip: corpus not present at {}", path.display());
+        return;
+    }
+    let mut reader = Reader::open(&path).expect("Reader::open failed");
+    let spectra: Vec<_> = reader.iter_spectra().collect();
+
+    let with_peaks: Vec<_> = spectra.iter().filter(|s| !s.mz.is_empty()).collect();
+    assert!(
+        !with_peaks.is_empty(),
+        "expected at least one spectrum with peaks"
+    );
+
+    // Raw (uncalibrated) time-bin values on this file run into the hundreds
+    // of thousands; a real calibrated m/z spectrum for these runs stays
+    // under ~2000 Da. If calibration silently stopped applying, this would
+    // catch the regression back to raw bins.
+    for s in &with_peaks {
+        let max_mz = s.mz.iter().cloned().fold(f64::MIN, f64::max);
+        assert!(
+            max_mz < 5000.0,
+            "spectrum {} has max mz {max_mz}, expected a calibrated value under 5000 Da",
             s.native_id
         );
     }
-
-    println!("First MS2: native_id={}", ms2[0].native_id);
 }
