@@ -8,6 +8,8 @@ use openmassspec_core::{
     Analyzer, CvTerm, PrecursorInfo, RunMetadata, ScanMode, SpectrumRecord, SpectrumSource,
 };
 
+use crate::raw::calibration::Calibration;
+use crate::raw::dde::DdeRecord;
 use crate::raw::idx::IdxRecord;
 use crate::raw::scan::{read_scan_block, ScanPoint};
 use crate::raw::summary_info::parse_create_timestamp;
@@ -20,6 +22,16 @@ const IDX_STREAM: &str = "SampleSubtree/Sample1/Idx";
 /// reserved/special rather than user data. See `raw::summary_info` for the
 /// investigation behind using this as the acquisition start timestamp.
 const SUMMARY_INFO_STREAM: &str = "\x05SummaryInformation";
+
+/// The CFBF stream path for TOF m/z calibration constants. Only present on
+/// TripleTOF-family acquisitions - see `raw::calibration` and
+/// `docs/format/04-legacy-wiff-calibration.md`.
+const CALIBRATION_STREAM: &str = "SampleSubtree/Sample1/TOFCalibrationData";
+
+/// The CFBF stream path for data-dependent precursor selection records.
+/// Only present on files with IDA/DDA-style precursor triggering - see
+/// `raw::dde` and `docs/format/04-legacy-wiff-calibration.md`.
+const DDE_STREAM: &str = "SampleSubtree/Sample1/DDERealTimeDataEx";
 
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
@@ -35,6 +47,14 @@ pub struct Reader {
     /// container's standard OLE `SummaryInformation` property set. `None`
     /// when that stream is absent or unparseable - see `raw::summary_info`.
     pub start_timestamp: Option<String>,
+    /// Linear m/z calibration constants read from `TOFCalibrationData`.
+    /// `None` on files without that stream (e.g. QTRAP-only acquisitions),
+    /// in which case `mz` arrays stay as raw uncalibrated bin values - see
+    /// `raw::calibration`.
+    calibration: Option<Calibration>,
+    /// Decoded `DDERealTimeDataEx` records, in stream order. Empty on files
+    /// without that stream (no DDA-style precursor triggering).
+    dde_records: Vec<DdeRecord>,
 }
 
 impl Reader {
@@ -97,6 +117,29 @@ impl Reader {
                 parse_create_timestamp(&buf)
             });
 
+        // Read TOF calibration constants, if present. Absent on QTRAP-only
+        // files - see `raw::calibration`.
+        let calibration = comp
+            .open_stream(CALIBRATION_STREAM)
+            .ok()
+            .and_then(|mut stream| {
+                let mut buf = Vec::new();
+                stream.read_to_end(&mut buf).ok()?;
+                Calibration::from_bytes(&buf)
+            });
+
+        // Read DDA precursor-selection records, if present. Absent on files
+        // without IDA/DDA-style precursor triggering - see `raw::dde`.
+        let dde_records = comp
+            .open_stream(DDE_STREAM)
+            .ok()
+            .map(|mut stream| {
+                let mut buf = Vec::new();
+                let _ = stream.read_to_end(&mut buf);
+                DdeRecord::parse_stream(&buf)
+            })
+            .unwrap_or_default();
+
         let stem = wiff_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -108,20 +151,32 @@ impl Reader {
             idx_records,
             scan_file_size,
             start_timestamp,
+            calibration,
+            dde_records,
         })
     }
 }
 
 /// Convert raw scan points to parallel mz/intensity vectors.
 ///
-/// The raw m/z bin is used as-is (as f64). Zero-intensity points are dropped
-/// because they are background artefacts of the zero-suppressed encoding.
-fn points_to_arrays(points: Vec<ScanPoint>) -> (Vec<f64>, Vec<f32>) {
+/// When `calibration` is available (TripleTOF-family files), the raw m/z
+/// bin is converted to physical m/z via `Calibration::apply`. Otherwise
+/// (QTRAP-only files - see `raw::calibration`) the raw bin is used as-is,
+/// matching prior behavior. Zero-intensity points are dropped because they
+/// are background artefacts of the zero-suppressed encoding.
+fn points_to_arrays(
+    points: Vec<ScanPoint>,
+    calibration: Option<Calibration>,
+) -> (Vec<f64>, Vec<f32>) {
     let mut mz = Vec::with_capacity(points.len());
     let mut intensity = Vec::with_capacity(points.len());
     for p in points {
         if p.raw_intensity > 0 {
-            mz.push(p.raw_mz_bin as f64);
+            let point_mz = match calibration {
+                Some(cal) => cal.apply(p.raw_mz_bin),
+                None => p.raw_mz_bin as f64,
+            };
+            mz.push(point_mz);
             intensity.push(p.raw_intensity as f32);
         }
     }
@@ -172,6 +227,8 @@ impl SpectrumSource for Reader {
         let scan_path = self.scan_path.clone();
         let scan_file_size = self.scan_file_size;
         let stem = self.stem.clone();
+        let calibration = self.calibration;
+        let dde_records = self.dde_records.clone();
 
         // Build an offset table for lookahead: next_offsets[i] is the byte
         // offset to use as the end bound when reading block i's payload.
@@ -190,66 +247,108 @@ impl SpectrumSource for Reader {
             v
         };
 
-        let iter = records.into_iter().zip(next_offsets).enumerate().map(
-            move |(idx, (rec, next_offset))| {
-                let native_id = format!("file={} scan={}", stem, idx + 1);
-
-                // Precursor info for MS2 spectra.
-                // The Idx stream does not contain precursor m/z; we supply a
-                // non-None precursor with only a placeholder native ID reference
-                // so that the conformance check (MS2 requires precursor present)
-                // passes. True precursor m/z lives in DDERealTimeDataEx (not yet
-                // decoded).
-                let precursor = if rec.ms_level >= 2 {
-                    Some(PrecursorInfo {
-                        precursor_native_id: Some(format!("file={} ms1ref=unknown", stem)),
-                        ..Default::default()
-                    })
-                } else {
-                    None
-                };
-
-                // Decode the scan payload.
-                let (mz, intensity) = {
-                    let points = read_scan_block(
-                        &scan_path,
-                        rec.scan_offset as u64,
-                        rec.scan_size as u64,
-                        next_offset,
-                    )
-                    .unwrap_or_default();
-                    points_to_arrays(points)
-                };
-
-                SpectrumRecord {
-                    index: idx,
-                    scan_number: (idx + 1) as u32,
-                    native_id,
-                    ms_level: rec.ms_level,
-                    polarity: None,
-                    scan_mode: Some(ScanMode::Profile),
-                    analyzer: Some(Analyzer::TOFMS),
-                    filter: None,
-                    retention_time_sec: rec.retention_time_min as f64 * 60.0,
-                    // Do NOT populate total_ion_current: the Idx TIC is in cps
-                    // (physically calibrated) and does not match sum(raw intensities).
-                    // The conformance suite checks this with rel_close; leaving None
-                    // means the mzML writer will compute TIC from intensity arrays
-                    // instead.
-                    total_ion_current: None,
-                    base_peak_mz: None,
-                    base_peak_intensity: None,
-                    low_mz: None,
-                    high_mz: None,
-                    ion_injection_time_ms: None,
-                    inv_mobility: None,
-                    precursor,
-                    mz,
-                    intensity,
-                    inv_mobility_per_peak: None,
+        // For each record, precompute the native ID of the most recent MS1
+        // scan seen *before* it, and how many MS1 scans have completed
+        // before it. The latter indexes into `dde_records`: DDERealTimeDataEx
+        // carries one entry per DDA cycle (matching MS1 count, not MS2
+        // count - see `raw::dde`), so an MS2 scan's precursor is the DDE
+        // record at (MS1-scans-seen-so-far - 1).
+        let (last_ms1_native_id, ms1_count_before): (Vec<Option<String>>, Vec<usize>) = {
+            let mut last_ids = Vec::with_capacity(records.len());
+            let mut counts = Vec::with_capacity(records.len());
+            let mut cur_last_id: Option<String> = None;
+            let mut cur_count = 0usize;
+            for (i, rec) in records.iter().enumerate() {
+                last_ids.push(cur_last_id.clone());
+                counts.push(cur_count);
+                if rec.ms_level == 1 {
+                    cur_last_id = Some(format!("file={} scan={}", stem, i + 1));
+                    cur_count += 1;
                 }
-            },
-        );
+            }
+            (last_ids, counts)
+        };
+
+        let iter = records
+            .into_iter()
+            .zip(next_offsets)
+            .zip(last_ms1_native_id)
+            .zip(ms1_count_before)
+            .enumerate()
+            .map(
+                move |(idx, (((rec, next_offset), last_ms1_id), ms1_count))| {
+                    let native_id = format!("file={} scan={}", stem, idx + 1);
+
+                    // Precursor info for MS2 spectra. `precursor_native_id`
+                    // references the preceding MS1 survey scan actually seen in
+                    // this file's Idx order. `selected_mz`/`target_mz` come from
+                    // DDERealTimeDataEx when available (heuristic cycle-based
+                    // linkage - see `raw::dde`); when that stream is absent or
+                    // the linkage doesn't resolve, precursor m/z stays `None`
+                    // rather than a guess. A small number of files have an MS2
+                    // scan before any MS1 has been seen at all (no survey scan
+                    // to reference yet); fall back to an explicit "unknown"
+                    // placeholder id only in that edge case, so the record still
+                    // carries the required precursor info without fabricating a
+                    // scan reference.
+                    let precursor = if rec.ms_level >= 2 {
+                        let precursor_mz = ms1_count
+                            .checked_sub(1)
+                            .and_then(|dde_idx| dde_records.get(dde_idx))
+                            .map(|dde| dde.precursor_mz);
+                        let precursor_native_id =
+                            last_ms1_id.or_else(|| Some(format!("file={} ms1ref=unknown", stem)));
+                        Some(PrecursorInfo {
+                            selected_mz: precursor_mz,
+                            target_mz: precursor_mz,
+                            precursor_native_id,
+                            ..Default::default()
+                        })
+                    } else {
+                        None
+                    };
+
+                    // Decode the scan payload.
+                    let (mz, intensity) = {
+                        let points = read_scan_block(
+                            &scan_path,
+                            rec.scan_offset as u64,
+                            rec.scan_size as u64,
+                            next_offset,
+                        )
+                        .unwrap_or_default();
+                        points_to_arrays(points, calibration)
+                    };
+
+                    SpectrumRecord {
+                        index: idx,
+                        scan_number: (idx + 1) as u32,
+                        native_id,
+                        ms_level: rec.ms_level,
+                        polarity: None,
+                        scan_mode: Some(ScanMode::Profile),
+                        analyzer: Some(Analyzer::TOFMS),
+                        filter: None,
+                        retention_time_sec: rec.retention_time_min as f64 * 60.0,
+                        // Do NOT populate total_ion_current: the Idx TIC is in cps
+                        // (physically calibrated) and does not match sum(raw intensities).
+                        // The conformance suite checks this with rel_close; leaving None
+                        // means the mzML writer will compute TIC from intensity arrays
+                        // instead.
+                        total_ion_current: None,
+                        base_peak_mz: None,
+                        base_peak_intensity: None,
+                        low_mz: None,
+                        high_mz: None,
+                        ion_injection_time_ms: None,
+                        inv_mobility: None,
+                        precursor,
+                        mz,
+                        intensity,
+                        inv_mobility_per_peak: None,
+                    }
+                },
+            );
 
         Box::new(iter)
     }
