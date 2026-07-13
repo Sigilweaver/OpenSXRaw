@@ -30,8 +30,8 @@
 //!   creation time is a reasonable proxy for the acquisition start time.
 //!
 //! No equivalent reliable field was found for the *instrument model*: the
-//! only candidate text (the `FileRec_Str` / `SummaryInformation`
-//! "author"/"comments" fields, and `SampleSubtree/Sample1/SampleDABE/CFR_INFO`)
+//! only candidate text (the `SummaryInformation` `PIDSI_AUTHOR` (id 4) /
+//! `PIDSI_COMMENTS` (id 6) properties, and `SampleSubtree/Sample1/SampleDABE/CFR_INFO`)
 //! carries the Analyst-configured instrument *name* and the acquisition
 //! computer's hostname, both of which are free text set by the lab at
 //! installation time. In one corpus fixture, this text happened to embed a
@@ -40,6 +40,60 @@
 //! (`"prot-user"` / `"D-CCB-04240"`) with no model information at all. This
 //! is not a reliable, vendor-populated field and is deliberately not parsed
 //! here - see the instrument CV term comment in `reader.rs`.
+//!
+//! # Round 2 (issue #4 follow-up): other streams checked and ruled out
+//!
+//! A later pass went looking for a *structured* instrument-model field
+//! elsewhere in the CFBF container, since the above is free text. Streams
+//! enumerated (`cfb::CompoundFile::walk`) across the same local corpus
+//! (200 successfully-opened `.wiff` files) and checked, none of which carry
+//! a usable instrument model:
+//!
+//! - `\x05DocumentSummaryInformation` (present in 196/201, the sibling OLE
+//!   property set to `SummaryInformation`) - carries the site's
+//!   organization/company name (`PIDDSI_COMPANY`) and an
+//!   `"Analyst file type: Data file, Analyst <version>"` string. Useful for
+//!   Analyst software version, not instrument identity.
+//! - `/FileRec_Str` (root stream, SCIEX's own `GUKGeneric`-tagged format,
+//!   present in 200/201) - byte-for-byte re-embeds the exact same
+//!   `PIDSI_AUTHOR` and `PIDSI_COMMENTS` strings from `SummaryInformation`
+//!   (verified directly: e.g. the `"Monash_6500"` / `"6500-PC"` fixture's
+//!   `FileRec_Str` contains those identical substrings). It is a derived
+//!   copy of the same free-text field, not an independent source.
+//! - `/MethodSubtree/MethodN/DeviceMethodN/VendorAppMethod` (182-187/201 for
+//!   the LC-device indices) - contains only the literal generic brand string
+//!   `"SCIEX"`, never a model number.
+//! - `/CFR/CFRFileHeader` (200/201) - only the checksum time/status text
+//!   already used for `start_timestamp` cross-validation above.
+//! - `SampleSubtree/Sample1/Devices/DeviceTable` and
+//!   `.../Devices/Device_N/Channel` - LC-side device/channel names (pump,
+//!   column oven), not the mass spectrometer.
+//! - `/MethodSubtree/Method1/AcqMethodFileInfoStm` and
+//!   `/Option2Temp/Opt2Rec` - `.dam` method file paths and edit timestamps.
+//!   A handful of fixtures' paths happened to contain a model-looking
+//!   number (e.g. a project folder literally named `Projects\6600\...`),
+//!   which is incidental to how that lab organized its filesystem, not a
+//!   vendor-populated field.
+//! - A corpus-wide substring scan (SCIEX/QTRAP/TripleTOF/TripleQuad/
+//!   QSTAR/ZenoTOF/model numbers like 4500-7500/X500, both ASCII and
+//!   UTF-16LE) across every stream under 2 MB in all 201 sampled `.wiff`
+//!   files found instrument-model-looking text only in the free-text
+//!   locations above - no additional structured stream turned up.
+//! - `/MethodSubtree/Method1/DeviceMethod0/MSConfigInfo` (a 144-byte binary
+//!   struct, present in 200/201, under the mass-spec device index) has a
+//!   `u32` at byte offset `0x20` that looked at first like it might be an
+//!   instrument-type enum. Cross-checked across the full corpus against the
+//!   free-text model hints in `FileRec_Str`, it does not cleanly separate
+//!   models: value `3` appears for TripleTOF 5600, TripleTOF 6600, 6500,
+//!   QTOF, QTRAP, and ZenoTOF fixtures alike, and value `4` appears for both
+//!   5600 and 6600. With no vendor documentation for this struct's layout,
+//!   there's no way to tell whether that's the wrong field, a
+//!   family-level-only code, or something unrelated (e.g. a channel/quad
+//!   count) - not safe to promote to a specific CV term.
+//!
+//! Conclusion unchanged from the first pass: no reliable, structured,
+//! vendor-populated instrument model field was found in this container
+//! format. See the instrument CV term comment in `reader.rs`.
 
 /// Property ID for `PIDSI_CREATE_DTM` ("time and date of creation") in the
 /// SummaryInformation property set, per `[MS-OLEPS]` section 2.15.
