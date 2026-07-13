@@ -2,6 +2,7 @@
 
 pub mod idx;
 pub mod scan;
+pub mod summary_info;
 
 /// Read exactly `length` bytes from `path` starting at `offset`.
 pub fn read_bytes(path: &std::path::Path, offset: u64, length: usize) -> crate::Result<Vec<u8>> {
