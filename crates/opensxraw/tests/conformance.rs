@@ -25,6 +25,22 @@ fn open_fixture_or_skip() -> Option<Reader> {
 }
 
 #[test]
+fn test_start_timestamp_from_summary_info() {
+    let Some(reader) = open_fixture_or_skip() else {
+        return;
+    };
+    let metadata = reader.run_metadata();
+    // The `.wiff` container's SummaryInformation PIDSI_CREATE_DTM property,
+    // cross-checked against the human-readable "Checksum Time" string in
+    // CFR/CFRFileHeader ("Tuesday, June 25, 2019 14:31:24", Melbourne
+    // AEST = UTC+10) - the two agree to the second.
+    assert_eq!(
+        metadata.start_timestamp.as_deref(),
+        Some("2019-06-25T04:31:23.912Z")
+    );
+}
+
+#[test]
 fn test_opens_and_reads_idx() {
     let Some(reader) = open_fixture_or_skip() else {
         return;
