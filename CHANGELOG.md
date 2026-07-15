@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-15
+
+### Fixed
+
+- Bumped `openmassspec-core` to 1.2.0 and added the `SpectrumRecord.faims_cv`
+  field it requires, fixing a build break: 1.2.0 added that field as
+  required, and `Reader::iter_spectra` constructed the struct literal
+  without it. Always `None` - SCIEX instruments have no FAIMS interface.
+
 ## [0.2.0] - 2026-07-11
 
 ### Added
