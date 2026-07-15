@@ -342,6 +342,7 @@ impl SpectrumSource for Reader {
                         high_mz: None,
                         ion_injection_time_ms: None,
                         inv_mobility: None,
+                        faims_cv: None, // SCIEX instruments have no FAIMS interface.
                         precursor,
                         mz,
                         intensity,
