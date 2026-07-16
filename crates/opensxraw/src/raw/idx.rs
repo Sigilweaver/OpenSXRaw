@@ -110,3 +110,111 @@ impl IdxRecord {
         Ok(records)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record_bytes(
+        scan_offset: u32,
+        scan_size: u32,
+        rt_min: f32,
+        ms_level_flag: u8,
+        tic: f64,
+        field_1a: f64,
+    ) -> Vec<u8> {
+        let mut buf = vec![0u8; IDX_RECORD_SIZE];
+        LittleEndian::write_u32(&mut buf[0x00..0x04], scan_offset);
+        LittleEndian::write_u32(&mut buf[0x04..0x08], scan_size);
+        LittleEndian::write_f32(&mut buf[0x0C..0x10], rt_min);
+        buf[0x10] = ms_level_flag;
+        LittleEndian::write_f64(&mut buf[0x12..0x1A], tic);
+        LittleEndian::write_f64(&mut buf[0x1A..0x22], field_1a);
+        buf
+    }
+
+    #[test]
+    fn from_bytes_parses_ms1_record() {
+        let buf = record_bytes(1000, 200, 1.5, 1, 12345.0, 0.0);
+        let rec = IdxRecord::from_bytes(&buf).unwrap();
+        assert_eq!(rec.scan_offset, 1000);
+        assert_eq!(rec.scan_size, 200);
+        assert_eq!(rec.ms_level, 1);
+        assert!((rec.retention_time_min - 1.5).abs() < 1e-6);
+        assert!((rec.tic - 12345.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn from_bytes_parses_ms2_record() {
+        // Any flag byte other than 1 means MS2, not just 0.
+        let buf = record_bytes(1000, 200, 1.5, 0, 0.0, 0.0);
+        assert_eq!(IdxRecord::from_bytes(&buf).unwrap().ms_level, 2);
+
+        let buf = record_bytes(1000, 200, 1.5, 7, 0.0, 0.0);
+        assert_eq!(IdxRecord::from_bytes(&buf).unwrap().ms_level, 2);
+    }
+
+    #[test]
+    fn from_bytes_rejects_zero_size_placeholder() {
+        let buf = record_bytes(0, 0, 0.0, 1, 0.0, 0.0);
+        assert!(IdxRecord::from_bytes(&buf).is_none());
+    }
+
+    #[test]
+    fn from_bytes_rejects_size_at_boundary() {
+        // scan_size == 56 is still rejected: must be strictly > 56 to hold
+        // at least the block header.
+        let buf = record_bytes(100, 56, 0.0, 1, 0.0, 0.0);
+        assert!(IdxRecord::from_bytes(&buf).is_none());
+    }
+
+    #[test]
+    fn from_bytes_accepts_size_just_above_boundary() {
+        let buf = record_bytes(100, 57, 0.0, 1, 0.0, 0.0);
+        assert!(IdxRecord::from_bytes(&buf).is_some());
+    }
+
+    #[test]
+    fn parse_stream_skips_header_and_placeholders() {
+        let mut data = vec![0u8; IDX_STREAM_HEADER];
+        data.extend(record_bytes(100, 200, 0.1, 1, 1.0, 0.0));
+        data.extend(record_bytes(0, 0, 0.0, 1, 0.0, 0.0)); // placeholder, skipped
+        data.extend(record_bytes(300, 200, 0.2, 0, 2.0, 0.0));
+
+        let records = IdxRecord::parse_stream(&data).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].scan_offset, 100);
+        assert_eq!(records[1].scan_offset, 300);
+        assert_eq!(records[1].ms_level, 2);
+    }
+
+    #[test]
+    fn parse_stream_errors_on_short_header() {
+        let data = vec![0u8; 10];
+        assert!(IdxRecord::parse_stream(&data).is_err());
+    }
+
+    #[test]
+    fn parse_stream_errors_when_all_records_are_placeholders() {
+        let mut data = vec![0u8; IDX_STREAM_HEADER];
+        data.extend(record_bytes(0, 0, 0.0, 1, 0.0, 0.0));
+        assert!(IdxRecord::parse_stream(&data).is_err());
+    }
+
+    #[test]
+    fn parse_stream_ignores_trailing_partial_record() {
+        let mut data = vec![0u8; IDX_STREAM_HEADER];
+        data.extend(record_bytes(100, 200, 0.1, 1, 1.0, 0.0));
+        data.extend(vec![0xab; 10]); // truncated trailing record, not a full 54 bytes
+
+        let records = IdxRecord::parse_stream(&data).unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn parse_stream_handles_empty_payload() {
+        // Header only, no records at all - not the same as "all placeholders".
+        let data = vec![0u8; IDX_STREAM_HEADER];
+        assert!(IdxRecord::parse_stream(&data).is_err());
+    }
+}
