@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size, and a sane absolute ceiling, replacing a `min()` cap that was
   always a no-op. (#1, contributed by @Nabejo)
 
+### Testing
+
+- Added synthetic byte-slice unit tests for `IdxRecord` parsing, the
+  `scan.rs` terminator scan, and `read_scan_block`'s offset bounds
+  (including a regression test for the crafted-offset DoS fixed in #1),
+  plus `points_to_arrays`. None of these need the out-of-tree corpus.
+  (#2, contributed by @Nabejo)
+
 ## [0.2.1] - 2026-07-15
 
 ### Fixed
