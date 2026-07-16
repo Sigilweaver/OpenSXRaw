@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `read_scan_block` no longer allocates an unbounded read buffer from a
+  crafted or corrupted Idx offset (a memory-DoS on malformed `.wiff`
+  input). The read length is now bounded by the Idx's own `scan_size`
+  field (previously computed but unused), the actual `.wiff.scan` file
+  size, and a sane absolute ceiling, replacing a `min()` cap that was
+  always a no-op. (#1, contributed by @Nabejo)
+
 ## [0.2.1] - 2026-07-15
 
 ### Fixed
