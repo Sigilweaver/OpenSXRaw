@@ -315,6 +315,7 @@ impl SpectrumSource for Reader {
                             rec.scan_offset as u64,
                             rec.scan_size as u64,
                             next_offset,
+                            scan_file_size,
                         )
                         .unwrap_or_default();
                         points_to_arrays(points, calibration)

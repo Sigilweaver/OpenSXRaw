@@ -161,28 +161,50 @@ pub fn decode_payload(payload: &[u8]) -> Vec<ScanPoint> {
     points
 }
 
+/// Absolute ceiling on a single scan block read, independent of the Idx or
+/// the file size. No known TripleTOF/QTRAP block comes remotely close to
+/// this; it exists purely to bound worst-case allocation from a malformed
+/// or adversarial Idx stream.
+const MAX_BLOCK_READ_LEN: u64 = 64 * 1024 * 1024; // 64 MiB
+
 /// Read and decode one scan block from the `.wiff.scan` file.
 ///
 /// `scan_offset` and `scan_size` come from the IdxRecord.
 /// `scan_path` is the path to the `.wiff.scan` file.
 /// `next_scan_offset` is the `scan_offset` of the *following* scan, or
 /// `file_size` for the last scan. It is used to bound the terminator search.
+/// `scan_file_size` is the actual on-disk size of `scan_path`.
 ///
 /// Returns the decoded scan points, or an empty vec if the block cannot be read.
 pub fn read_scan_block(
     scan_path: &std::path::Path,
     scan_offset: u64,
-    _scan_size: u64,
+    scan_size: u64,
     next_scan_offset: u64,
+    scan_file_size: u64,
 ) -> crate::Result<Vec<ScanPoint>> {
     use std::io::{Read, Seek, SeekFrom};
 
     let payload_start = scan_offset + 56;
 
-    // We need to read from payload_start through next_scan_offset + 56
-    // (the terminator falls inside the next block's 56-byte window).
-    // Cap at a reasonable maximum to avoid huge reads on the last block.
-    let read_end = (next_scan_offset + 56).min(next_scan_offset + 64);
+    // Bound the read length from several independent sources, since a
+    // crafted Idx can lie about any single one of them:
+    //   - `next_scan_offset + 64`: where the following block (and thus this
+    //     block's terminator) is expected to start, per the module doc,
+    //     plus slack for the next block's 56-byte header window.
+    //   - `scan_offset + scan_size + 64`: this record's own declared block
+    //     extent (the Idx `scan_size` field, previously unused here), an
+    //     estimate of the same boundary that doesn't depend on any other
+    //     record.
+    //   - `scan_file_size`: the actual size of the file on disk - the only
+    //     bound here that isn't attacker-controlled, and the one that
+    //     actually stops the unbounded-allocation case.
+    //   - `MAX_BLOCK_READ_LEN`: a sane absolute ceiling regardless of how
+    //     large the file legitimately is.
+    let read_end = (next_scan_offset + 64)
+        .min(scan_offset + scan_size + 64)
+        .min(scan_file_size)
+        .min(payload_start.saturating_add(MAX_BLOCK_READ_LEN));
     if read_end <= payload_start {
         return Ok(vec![]);
     }
