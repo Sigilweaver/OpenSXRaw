@@ -355,3 +355,50 @@ impl SpectrumSource for Reader {
         Box::new(iter)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::raw::calibration::Calibration;
+
+    fn point(raw_mz_bin: u32, raw_intensity: u32) -> ScanPoint {
+        ScanPoint {
+            raw_mz_bin,
+            raw_intensity,
+        }
+    }
+
+    #[test]
+    fn points_to_arrays_drops_zero_intensity_points() {
+        let points = vec![point(10, 0), point(20, 5), point(30, 0)];
+        let (mz, intensity) = points_to_arrays(points, None);
+        assert_eq!(mz, vec![20.0]);
+        assert_eq!(intensity, vec![5.0]);
+    }
+
+    #[test]
+    fn points_to_arrays_uses_raw_bin_without_calibration() {
+        let points = vec![point(100, 1), point(200, 2)];
+        let (mz, intensity) = points_to_arrays(points, None);
+        assert_eq!(mz, vec![100.0, 200.0]);
+        assert_eq!(intensity, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn points_to_arrays_applies_calibration_when_present() {
+        let cal = Calibration {
+            slope: 0.001,
+            intercept: 0.5,
+        };
+        let points = vec![point(1000, 1)];
+        let (mz, _intensity) = points_to_arrays(points, Some(cal));
+        assert!((mz[0] - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn points_to_arrays_on_empty_input() {
+        let (mz, intensity) = points_to_arrays(vec![], None);
+        assert!(mz.is_empty());
+        assert!(intensity.is_empty());
+    }
+}
