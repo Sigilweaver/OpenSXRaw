@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use cfb::CompoundFile;
 use openmassspec_core::{
-    Analyzer, CvTerm, PrecursorInfo, RunMetadata, ScanMode, SpectrumRecord, SpectrumSource,
+    Analyzer, ChromatogramRecord, CvTerm, PrecursorInfo, RunMetadata, ScanMode, SpectrumRecord,
+    SpectrumSource,
 };
 
 use crate::raw::calibration::Calibration;
@@ -352,5 +353,125 @@ impl SpectrumSource for Reader {
             );
 
         Box::new(iter)
+    }
+
+    fn iter_chromatograms<'a>(&'a mut self) -> Box<dyn Iterator<Item = ChromatogramRecord> + 'a> {
+        // Emit a single total-ion-current chromatogram built entirely from
+        // data already decoded into `idx_records`: one point per Idx record,
+        // `time_sec` from `retention_time_min * 60.0` and `intensity` from the
+        // record's `tic` field. No new raw-format decode work is involved,
+        // only wiring existing fields into the chromatogram shape.
+        //
+        // This is deliberately distinct from the per-spectrum
+        // `SpectrumRecord.total_ion_current` field, which `iter_spectra`
+        // leaves `None` on purpose: the conformance suite checks that field
+        // with `rel_close` against `sum(raw intensities)`, and the Idx TIC is
+        // in cps (physically calibrated) so it would not match. That check
+        // applies only to the per-spectrum field; a TIC chromatogram is a
+        // separate trace of (retention time, cps) points that the conformance
+        // suite never inspects, so the mismatch reasoning does not apply here.
+        //
+        // Only TIC is emitted. A basepeak chromatogram (BPC) would need a
+        // per-scan base peak, which nothing decodes today, and SRM/MRM
+        // chromatograms would need transition-level data that this reader
+        // does not decode at all - both are tracked as separate follow-ups
+        // (see Sigilweaver/OpenSXRaw#21).
+        let mut time_sec = Vec::with_capacity(self.idx_records.len());
+        let mut intensity = Vec::with_capacity(self.idx_records.len());
+        for rec in &self.idx_records {
+            time_sec.push(rec.retention_time_min * 60.0);
+            intensity.push(rec.tic as f32);
+        }
+
+        let record = ChromatogramRecord {
+            index: 0,
+            id: "TIC".to_string(),
+            chromatogram_type: Some(CvTerm::new("MS:1000235", "total ion current chromatogram")),
+            precursor_mz: None,
+            product_mz: None,
+            time_sec,
+            intensity,
+        };
+
+        Box::new(std::iter::once(record))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Build a `Reader` from synthetic `idx_records` only, bypassing file I/O,
+    /// so the chromatogram wiring can be exercised without a corpus fixture.
+    /// This mirrors what `Reader::open` populates: `iter_chromatograms` reads
+    /// only `idx_records`, so the remaining fields are inert placeholders.
+    fn reader_with_idx(idx_records: Vec<IdxRecord>) -> Reader {
+        Reader {
+            stem: "synthetic".to_string(),
+            scan_path: PathBuf::from("synthetic.wiff.scan"),
+            idx_records,
+            scan_file_size: 0,
+            start_timestamp: None,
+            calibration: None,
+            dde_records: Vec::new(),
+        }
+    }
+
+    fn idx_record(retention_time_min: f32, ms_level: u32, tic: f64) -> IdxRecord {
+        IdxRecord {
+            scan_offset: 0,
+            scan_size: 0,
+            retention_time_min,
+            ms_level,
+            tic,
+            _field_1a: 0.0,
+        }
+    }
+
+    #[test]
+    fn iter_chromatograms_emits_single_tic_from_idx_records() {
+        // One MS1 and one MS2 record: the TIC chromatogram has one point per
+        // Idx record regardless of MS level.
+        let mut reader =
+            reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.5, 2, 250.0)]);
+
+        let chroms: Vec<ChromatogramRecord> = reader.iter_chromatograms().collect();
+
+        assert_eq!(chroms.len(), 1, "expected exactly one TIC chromatogram");
+        let tic = &chroms[0];
+        assert_eq!(tic.index, 0);
+        assert_eq!(tic.id, "TIC");
+        let cv = tic
+            .chromatogram_type
+            .as_ref()
+            .expect("TIC chromatogram must carry a chromatogram_type CV term");
+        assert_eq!(cv.accession, "MS:1000235");
+        assert_eq!(cv.name, "total ion current chromatogram");
+
+        // TIC carries no precursor/product m/z (those are for SRM/MRM).
+        assert!(tic.precursor_mz.is_none());
+        assert!(tic.product_mz.is_none());
+
+        // time_sec is retention_time_min * 60.0; intensity is the Idx tic.
+        assert_eq!(tic.time_sec, vec![0.0, 30.0]);
+        assert_eq!(tic.intensity, vec![100.0, 250.0]);
+        assert_eq!(tic.time_sec.len(), tic.intensity.len());
+    }
+
+    #[test]
+    fn iter_chromatograms_tic_intensity_uses_idx_tic_not_spectrum_field() {
+        // Regression guard for the reasoning in the method's doc comment: the
+        // TIC chromatogram intensity comes straight from the Idx record's
+        // physically-calibrated `tic` (cps), independent of the per-spectrum
+        // `SpectrumRecord.total_ion_current` field (which stays `None` so the
+        // conformance suite's `rel_close` check against sum(intensities) is
+        // not tripped). A large cps value that could never equal a raw
+        // intensity sum must still pass through verbatim.
+        let mut reader = reader_with_idx(vec![idx_record(1.0, 1, 1_234_567.0)]);
+        let chroms: Vec<ChromatogramRecord> = reader.iter_chromatograms().collect();
+        assert_eq!(chroms.len(), 1);
+        assert_eq!(chroms[0].time_sec, vec![60.0]);
+        assert_eq!(chroms[0].intensity, vec![1_234_567.0]);
     }
 }
