@@ -1,5 +1,9 @@
 # OpenSXRaw
 
+[![CI](https://github.com/Sigilweaver/OpenSXRaw/actions/workflows/ci.yml/badge.svg)](https://github.com/Sigilweaver/OpenSXRaw/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/opensxraw.svg)](https://crates.io/crates/opensxraw)
+[![PyPI](https://img.shields.io/pypi/v/opensxraw.svg)](https://pypi.org/project/opensxraw/)
+[![docs.rs](https://img.shields.io/docsrs/opensxraw)](https://docs.rs/opensxraw)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -14,6 +18,8 @@ Rust and Python reader for SCIEX `.wiff`/`.wiff.scan` legacy mass
 spectrometry data files, clean-room reverse-engineered with no SCIEX SDK
 or software dependency. Covers the TripleTOF and QTRAP instrument
 families.
+
+Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxraw/docs)
 
 ## Status
 
