@@ -15,31 +15,10 @@
 > [OpenARaw](https://github.com/Sigilweaver/OpenARaw) (Agilent).
 
 Rust and Python reader for SCIEX `.wiff`/`.wiff.scan` legacy mass
-spectrometry data files, clean-room reverse-engineered with no SCIEX SDK
-or software dependency. Covers the TripleTOF and QTRAP instrument
-families.
+spectrometry data files, with no SCIEX SDK or software dependency.
+Covers the TripleTOF and QTRAP instrument families.
 
 Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxraw/docs)
-
-## Status
-
-Published on crates.io (`opensxraw`). Python bindings (`opensxraw` on
-PyPI) publish from the release workflow. The legacy `.wiff`/`.wiff.scan`
-format is fully decoded and has a
-working reader (`crates/opensxraw`), tested against a real TripleTOF 5600
-corpus file (2228 scans decoded).
-
-`.wiff2`, SCIEX's newer self-contained format, was investigated in depth
-(see [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md))
-but uses proprietary, non-standard encryption that could not be resolved
-from the ciphertext alone, so `.wiff2` support is deferred pending new
-information. See [docs/format/](docs/format/) for the full format
-writeups.
-
-Known limitations: m/z values are raw, uncalibrated time-bin integers
-(no `ExperimentTOF` calibration yet); MS2 precursor m/z is not yet
-populated (`DDERealTimeDataEx` not yet decoded). See
-[CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Install
 
@@ -98,6 +77,9 @@ print(spectrum.ms_level, spectrum.retention_time_sec, len(spectrum.mz))
 `Reader::open` (and `RawReader`) expects the paired `.wiff.scan` file to
 sit alongside the `.wiff` file, with `.scan` appended to the `.wiff`
 filename.
+
+See the [docs site](https://sigilweaver.app/opensxraw/docs) for the full
+guide, format specification, and API reference.
 
 ## License
 
