@@ -82,6 +82,35 @@ fn test_conformance_invariants() {
 }
 
 #[test]
+fn test_iter_chromatograms_emits_tic() {
+    let Some(mut reader) = open_fixture_or_skip() else {
+        return;
+    };
+    let n_records = reader.idx_records.len();
+    assert!(n_records > 0, "fixture should have Idx records");
+
+    let chroms: Vec<_> = reader.iter_chromatograms().collect();
+
+    // Exactly one TIC chromatogram: BPC/SRM need net-new decode work and are
+    // intentionally out of scope (see Sigilweaver/OpenSXRaw#21).
+    assert_eq!(chroms.len(), 1, "expected exactly one (TIC) chromatogram");
+    let tic = &chroms[0];
+    let cv = tic
+        .chromatogram_type
+        .as_ref()
+        .expect("TIC chromatogram must carry a chromatogram_type CV term");
+    assert_eq!(cv.accession, "MS:1000235");
+    assert_eq!(cv.name, "total ion current chromatogram");
+    assert!(tic.precursor_mz.is_none());
+    assert!(tic.product_mz.is_none());
+
+    // One point per Idx record, with parallel time/intensity arrays.
+    assert_eq!(tic.time_sec.len(), n_records);
+    assert_eq!(tic.intensity.len(), n_records);
+    println!("TIC chromatogram: {} points", tic.time_sec.len());
+}
+
+#[test]
 fn test_ms1_has_peaks() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;

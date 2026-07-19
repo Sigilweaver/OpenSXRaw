@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Reader::iter_chromatograms` (Sigilweaver/OpenSXRaw#21): emits a single
+  total ion current chromatogram (`MS:1000235`) built from the already-decoded
+  `idx_records` - one point per record, `time_sec` from `retention_time_min`
+  and `intensity` from the record's Idx `tic` (cps). No new raw-format decode
+  work is involved, only wiring existing fields into `ChromatogramRecord`, so
+  TIC chromatograms now appear in the mzML `<chromatogramList>` OpenSXRaw
+  produces. The per-spectrum `SpectrumRecord.total_ion_current` field stays
+  `None` as before (that value must match `sum(raw intensities)` for the
+  conformance suite's `rel_close` check, which does not apply to a separate
+  chromatogram trace). Basepeak (BPC) and SRM/MRM chromatograms are
+  intentionally left out - both require net-new decode work and should be
+  tracked as separate follow-up issues. (contributed by @Nabejo)
+
 ## [0.2.1] - 2026-07-15
 
 ### Fixed
