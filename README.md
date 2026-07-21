@@ -7,12 +7,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-> Part of the [OpenMassSpec](https://sigilweaver.app/openmassspec/docs/)
-> stack for mass spectrometry raw-file access. Sibling readers:
-> [OpenTFRaw](https://github.com/Sigilweaver/OpenTFRaw) (Thermo),
-> [OpenWRaw](https://github.com/Sigilweaver/OpenWRaw) (Waters),
-> [OpenTimsTDF](https://github.com/Sigilweaver/OpenTimsTDF) (Bruker),
-> [OpenARaw](https://github.com/Sigilweaver/OpenARaw) (Agilent).
+> Part of the [OpenMassSpec](https://github.com/Sigilweaver/OpenMassSpec)
+> stack for mass spectrometry raw-file access.
 
 Rust and Python reader for SCIEX `.wiff`/`.wiff.scan` legacy mass
 spectrometry data files, with no SCIEX SDK or software dependency.
