@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-25
+
+### Fixed
+
+- Adapted `RunMetadata` construction to `openmassspec-core` 1.3.0's new
+  `analyzers`/`instrument_serial_number` fields (defaulted, as neither is
+  decoded here - see `raw::summary_info`'s module doc for why no reliable
+  serial number source exists).
+
 ## [0.2.2] - 2026-07-20
 
 ### Fixed
