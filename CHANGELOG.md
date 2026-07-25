@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `analyzers`/`instrument_serial_number` fields (defaulted, as neither is
   decoded here - see `raw::summary_info`'s module doc for why no reliable
   serial number source exists).
+- Declared `openmassspec-core` minimum was still `"1.0.0"`, undercounting
+  every prior bump; now that the code needs 1.3.0's new `RunMetadata`
+  fields to compile, bumped the declared minimum to `"1.3.0"` to match.
 
 ## [0.2.2] - 2026-07-20
 
