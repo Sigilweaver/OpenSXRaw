@@ -209,10 +209,14 @@ impl SpectrumSource for Reader {
             // ruled out. This is confirmed investigated-and-not-resolvable
             // from the current file structure, not just unattempted.
             instrument: CvTerm::new("MS:1000121", "SCIEX instrument model"),
+            // No serial number source either - same ruled-out CFBF streams
+            // as the instrument model above.
+            instrument_serial_number: None,
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
             start_timestamp: self.start_timestamp.clone(),
             mobility_array_kind: None,
+            analyzers: Vec::new(),
         }
     }
 
