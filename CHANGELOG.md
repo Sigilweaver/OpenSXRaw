@@ -22,6 +22,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intentionally left out - both require net-new decode work and should be
   tracked as separate follow-up issues. (contributed by @Nabejo)
 
+## [0.2.3] - 2026-07-25
+
+### Fixed
+
+- Adapted `RunMetadata` construction to `openmassspec-core` 1.3.0's new
+  `analyzers`/`instrument_serial_number` fields (defaulted, as neither is
+  decoded here - see `raw::summary_info`'s module doc for why no reliable
+  serial number source exists).
+- Declared `openmassspec-core` minimum was still `"1.0.0"`, undercounting
+  every prior bump; now that the code needs 1.3.0's new `RunMetadata`
+  fields to compile, bumped the declared minimum to `"1.3.0"` to match.
+
+## [0.2.2] - 2026-07-20
+
+### Fixed
+
+- `read_scan_block` no longer allocates an unbounded read buffer from a
+  crafted or corrupted Idx offset (a memory-DoS on malformed `.wiff`
+  input). The read length is now bounded by the Idx's own `scan_size`
+  field (previously computed but unused), the actual `.wiff.scan` file
+  size, and a sane absolute ceiling, replacing a `min()` cap that was
+  always a no-op. (#1, contributed by @Nabejo)
+
+### Testing
+
+- Added synthetic byte-slice unit tests for `IdxRecord` parsing, the
+  `scan.rs` terminator scan, and `read_scan_block`'s offset bounds
+  (including a regression test for the crafted-offset DoS fixed in #1),
+  plus `points_to_arrays`. None of these need the out-of-tree corpus.
+  (#2, contributed by @Nabejo)
+
 ## [0.2.1] - 2026-07-15
 
 ### Fixed
