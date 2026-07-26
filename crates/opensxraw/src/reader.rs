@@ -405,6 +405,7 @@ impl SpectrumSource for Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::raw::calibration::Calibration;
     use std::path::PathBuf;
 
     /// Build a `Reader` from synthetic `idx_records` only, bypassing file I/O,
@@ -479,12 +480,6 @@ mod tests {
         assert_eq!(chroms[0].time_sec, vec![60.0]);
         assert_eq!(chroms[0].intensity, vec![1_234_567.0]);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::raw::calibration::Calibration;
 
     fn point(raw_mz_bin: u32, raw_intensity: u32) -> ScanPoint {
         ScanPoint {
