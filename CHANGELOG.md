@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intentionally left out - both require net-new decode work and should be
   tracked as separate follow-up issues. (contributed by @Nabejo)
 
+### Documentation
+
+- Documented the `SpectrumRecord.polarity` investigation for
+  Sigilweaver/OpenSXRaw#26 directly on the field in `reader.rs` (plus a
+  cross-reference note on the `Idx` record's "Unknown" bytes in
+  `raw/idx.rs`). None of the streams this reader currently decodes
+  (`SummaryInformation`, `TOFCalibrationData`, `DDERealTimeDataEx`, `Idx`,
+  the `.wiff.scan` token stream) carry a per-scan or per-run polarity
+  signal - the `Idx` record's two "Unknown" bytes were already checked by
+  issue #7 (for an unrelated bug) and found uniformly zero, ruling them
+  out too. Polarity most likely lives in the undecoded per-Experiment
+  `ExperimentHeader`/`ExperimentHeaderEx` method structures. No behavior
+  change: `polarity` stays `None`, now as a documented, investigated
+  conclusion rather than a silent placeholder, per this project's
+  clean-room "don't guess" policy. (Sigilweaver/OpenSXRaw#26, contributed
+  by @Nabejo)
+
 ## [0.2.3] - 2026-07-25
 
 ### Fixed
