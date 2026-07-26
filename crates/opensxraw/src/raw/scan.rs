@@ -161,28 +161,50 @@ pub fn decode_payload(payload: &[u8]) -> Vec<ScanPoint> {
     points
 }
 
+/// Absolute ceiling on a single scan block read, independent of the Idx or
+/// the file size. No known TripleTOF/QTRAP block comes remotely close to
+/// this; it exists purely to bound worst-case allocation from a malformed
+/// or adversarial Idx stream.
+const MAX_BLOCK_READ_LEN: u64 = 64 * 1024 * 1024; // 64 MiB
+
 /// Read and decode one scan block from the `.wiff.scan` file.
 ///
 /// `scan_offset` and `scan_size` come from the IdxRecord.
 /// `scan_path` is the path to the `.wiff.scan` file.
 /// `next_scan_offset` is the `scan_offset` of the *following* scan, or
 /// `file_size` for the last scan. It is used to bound the terminator search.
+/// `scan_file_size` is the actual on-disk size of `scan_path`.
 ///
 /// Returns the decoded scan points, or an empty vec if the block cannot be read.
 pub fn read_scan_block(
     scan_path: &std::path::Path,
     scan_offset: u64,
-    _scan_size: u64,
+    scan_size: u64,
     next_scan_offset: u64,
+    scan_file_size: u64,
 ) -> crate::Result<Vec<ScanPoint>> {
     use std::io::{Read, Seek, SeekFrom};
 
     let payload_start = scan_offset + 56;
 
-    // We need to read from payload_start through next_scan_offset + 56
-    // (the terminator falls inside the next block's 56-byte window).
-    // Cap at a reasonable maximum to avoid huge reads on the last block.
-    let read_end = (next_scan_offset + 56).min(next_scan_offset + 64);
+    // Bound the read length from several independent sources, since a
+    // crafted Idx can lie about any single one of them:
+    //   - `next_scan_offset + 64`: where the following block (and thus this
+    //     block's terminator) is expected to start, per the module doc,
+    //     plus slack for the next block's 56-byte header window.
+    //   - `scan_offset + scan_size + 64`: this record's own declared block
+    //     extent (the Idx `scan_size` field, previously unused here), an
+    //     estimate of the same boundary that doesn't depend on any other
+    //     record.
+    //   - `scan_file_size`: the actual size of the file on disk - the only
+    //     bound here that isn't attacker-controlled, and the one that
+    //     actually stops the unbounded-allocation case.
+    //   - `MAX_BLOCK_READ_LEN`: a sane absolute ceiling regardless of how
+    //     large the file legitimately is.
+    let read_end = (next_scan_offset + 64)
+        .min(scan_offset + scan_size + 64)
+        .min(scan_file_size)
+        .min(payload_start.saturating_add(MAX_BLOCK_READ_LEN));
     if read_end <= payload_start {
         return Ok(vec![]);
     }
@@ -252,5 +274,105 @@ mod tests {
         let data: Vec<u8> = vec![0x29, 0x81, 0xff, 0xff, 0xff, 0xff, 0x29, 0x81];
         let pts = decode_payload(&data);
         assert_eq!(pts.len(), 1);
+    }
+
+    #[test]
+    fn find_terminator_locates_first_match() {
+        let buf = [0x01, 0x02, 0xff, 0xff, 0xff, 0xff, 0x03];
+        assert_eq!(find_terminator(&buf), 2);
+    }
+
+    #[test]
+    fn find_terminator_returns_len_when_absent() {
+        let buf = [0x01, 0x02, 0xff, 0xff, 0xff];
+        assert_eq!(find_terminator(&buf), buf.len());
+    }
+
+    #[test]
+    fn find_terminator_ignores_runs_shorter_than_four() {
+        let buf = [0xff, 0xff, 0xff, 0x00, 0x01];
+        assert_eq!(find_terminator(&buf), buf.len());
+    }
+
+    #[test]
+    fn find_terminator_on_empty_buffer() {
+        assert_eq!(find_terminator(&[]), 0);
+    }
+
+    /// Writes `data` to a uniquely-named file under the OS temp dir and
+    /// returns its path. Used instead of a `tempfile` dependency since these
+    /// are the only tests in the crate that need a real file on disk.
+    fn write_temp_scan_file(name: &str, data: &[u8]) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "opensxraw_test_{}_{}.wiff.scan",
+            std::process::id(),
+            name
+        ));
+        std::fs::write(&path, data).unwrap();
+        path
+    }
+
+    #[test]
+    fn read_scan_block_decodes_within_bounds() {
+        // 56 bytes of header junk, then a 2-byte payload (gap 41, 1-byte
+        // intensity 1), then the ff ff ff ff terminator.
+        let mut data = vec![0u8; 56];
+        data.extend_from_slice(&[0x29, 0x81, 0xff, 0xff, 0xff, 0xff]);
+        let file_size = data.len() as u64; // 62
+
+        let path = write_temp_scan_file("decodes_within_bounds", &data);
+        let points = read_scan_block(
+            &path, 0, /* scan_size */ 1000, /* next_scan_offset */ 6, file_size,
+        )
+        .unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].raw_mz_bin, 41);
+        assert_eq!(points[0].raw_intensity, 1);
+    }
+
+    #[test]
+    fn read_scan_block_caps_crafted_offset_to_file_size() {
+        // Regression test for the memory-DoS: an Idx claiming a ~4 GiB
+        // scan_size / next_scan_offset against a tiny real file must not
+        // attempt a multi-gigabyte allocation. If this hangs or OOMs, the
+        // bound was reintroduced as a no-op.
+        let data = vec![0u8; 64];
+        let file_size = data.len() as u64;
+        let path = write_temp_scan_file("caps_crafted_offset", &data);
+
+        let points =
+            read_scan_block(&path, 0, u32::MAX as u64, u32::MAX as u64, file_size).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        // No terminator in an all-zero buffer, so decode runs to the end of
+        // the (correctly bounded) slice - the assertion that matters is that
+        // this returned at all rather than allocating ~4 GiB.
+        assert!(points.is_empty());
+    }
+
+    #[test]
+    fn read_scan_block_returns_empty_when_offset_past_file_end() {
+        let data = vec![0u8; 64];
+        let path = write_temp_scan_file("offset_past_file_end", &data);
+
+        let points = read_scan_block(&path, 10_000, 1000, 11_000, data.len() as u64).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert!(points.is_empty());
+    }
+
+    #[test]
+    fn read_scan_block_returns_empty_on_truncated_file() {
+        // File shorter than the 56-byte block header itself.
+        let data = vec![0u8; 10];
+        let path = write_temp_scan_file("truncated_file", &data);
+
+        let points = read_scan_block(&path, 0, 1000, 6, data.len() as u64).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert!(points.is_empty());
     }
 }

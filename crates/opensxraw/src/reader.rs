@@ -210,10 +210,14 @@ impl SpectrumSource for Reader {
             // ruled out. This is confirmed investigated-and-not-resolvable
             // from the current file structure, not just unattempted.
             instrument: CvTerm::new("MS:1000121", "SCIEX instrument model"),
+            // No serial number source either - same ruled-out CFBF streams
+            // as the instrument model above.
+            instrument_serial_number: None,
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
             start_timestamp: self.start_timestamp.clone(),
             mobility_array_kind: None,
+            analyzers: Vec::new(),
         }
     }
 
@@ -316,6 +320,7 @@ impl SpectrumSource for Reader {
                             rec.scan_offset as u64,
                             rec.scan_size as u64,
                             next_offset,
+                            scan_file_size,
                         )
                         .unwrap_or_default();
                         points_to_arrays(points, calibration)
@@ -473,5 +478,52 @@ mod tests {
         assert_eq!(chroms.len(), 1);
         assert_eq!(chroms[0].time_sec, vec![60.0]);
         assert_eq!(chroms[0].intensity, vec![1_234_567.0]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::raw::calibration::Calibration;
+
+    fn point(raw_mz_bin: u32, raw_intensity: u32) -> ScanPoint {
+        ScanPoint {
+            raw_mz_bin,
+            raw_intensity,
+        }
+    }
+
+    #[test]
+    fn points_to_arrays_drops_zero_intensity_points() {
+        let points = vec![point(10, 0), point(20, 5), point(30, 0)];
+        let (mz, intensity) = points_to_arrays(points, None);
+        assert_eq!(mz, vec![20.0]);
+        assert_eq!(intensity, vec![5.0]);
+    }
+
+    #[test]
+    fn points_to_arrays_uses_raw_bin_without_calibration() {
+        let points = vec![point(100, 1), point(200, 2)];
+        let (mz, intensity) = points_to_arrays(points, None);
+        assert_eq!(mz, vec![100.0, 200.0]);
+        assert_eq!(intensity, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn points_to_arrays_applies_calibration_when_present() {
+        let cal = Calibration {
+            slope: 0.001,
+            intercept: 0.5,
+        };
+        let points = vec![point(1000, 1)];
+        let (mz, _intensity) = points_to_arrays(points, Some(cal));
+        assert!((mz[0] - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn points_to_arrays_on_empty_input() {
+        let (mz, intensity) = points_to_arrays(vec![], None);
+        assert!(mz.is_empty());
+        assert!(intensity.is_empty());
     }
 }
