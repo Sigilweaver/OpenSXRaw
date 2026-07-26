@@ -42,10 +42,14 @@ disk in minutes) converted to seconds.
 
 ## Fields not yet populated
 
-The reader currently reports every spectrum as profile-mode / `TOFMS`
-analyzer regardless of the actual instrument family (QTRAP records are not
-yet distinguished), and leaves `total_ion_current` unset - the `Idx` TIC
-is in physically calibrated cps and does not match the sum of the raw
-intensity counts, so the mzML writer recomputes TIC from the intensity
-array instead. See the [format overview](../format/overview) for the full
-list of known limitations.
+The reader reports every spectrum with a `TOFMS` analyzer regardless of
+the actual instrument family (QTRAP records are not yet distinguished),
+and leaves `total_ion_current` unset - the `Idx` TIC is in physically
+calibrated cps and does not match the sum of the raw intensity counts, so
+the mzML writer recomputes TIC from the intensity array instead. `scan_mode`
+is also left unset (`None`): no currently-decoded stream carries a
+per-scan or per-experiment centroid/profile indicator, and unconditionally
+reporting `Profile` (the prior behavior) mislabeled centroided
+acquisitions - see [Reader: what the reader does not yet
+do](./reader#what-the-reader-does-not-yet-do). See the [format
+overview](../format/overview) for the full list of known limitations.
