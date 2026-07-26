@@ -49,11 +49,16 @@ where that data actually lives on disk.
   yet decoded.
 - **Precursor m/z**: as above, MS2 spectra don't carry a real
   `target_mz` yet.
-- **Instrument-aware scan mode**: every spectrum is currently reported as
-  profile-mode with a TOFMS analyzer, regardless of whether the source
-  file is actually a QTRAP acquisition (which is nominal-mass, not true
-  time-of-flight). This is a simplification in the current reader, not a
-  property of the format itself.
+- **Instrument-aware analyzer**: every spectrum is currently reported with
+  a TOFMS analyzer, regardless of whether the source file is actually a
+  QTRAP acquisition (which is nominal-mass, not true time-of-flight).
+  This is a simplification in the current reader, not a property of the
+  format itself.
+- **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
+  every spectrum. No stream decoded so far (`Idx`, `DDERealTimeDataEx`,
+  `SummaryInformation`) carries a reliable per-scan or per-experiment
+  centroid/profile indicator; a prior version of the reader hardcoded
+  `Profile` here, which mislabeled centroided acquisitions.
 
 ## Error handling
 

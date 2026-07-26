@@ -27,8 +27,8 @@ true time-of-flight, unlike TripleTOF.
 
 It currently doesn't. `Reader` reads scan data identically for both
 families via the shared `Idx`/`.wiff.scan` mechanism, and reports every
-spectrum with the same `Analyzer::TOFMS` / profile-mode metadata
-regardless of source instrument - see
+spectrum with the same `Analyzer::TOFMS` metadata regardless of source
+instrument - see
 [Reader: what the reader does not yet do](./reader#what-the-reader-does-not-yet-do).
 If you need to distinguish TripleTOF from QTRAP output today, check the
 method-subtree contents yourself (`ExperimentTOF` vs `sMRM`/`sMRMEX`) - a
