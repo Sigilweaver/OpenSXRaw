@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Reader::list_samples` and `Reader::open_sample` (#25): a `.wiff`
+  container can hold more than one sample (`SampleSubtree/Sample1`,
+  `Sample2`, ...), but every stream path in the reader was hardcoded to
+  `Sample1`, so multi-sample files had every other sample silently
+  dropped with no error or warning. `Reader::list_samples` enumerates the
+  sample subtrees actually present in a file (found by walking the CFBF
+  directory, a public Microsoft container format, not SCIEX-specific), and
+  `Reader::open_sample` opens a specific one by name. `Reader::open` keeps
+  its existing signature for the common single-sample case, but now
+  returns a clear error instead of quietly reading only the first sample
+  when a file turns out to hold more than one - callers that need a
+  specific sample from a multi-sample file should call `open_sample`
+  directly. No corpus file with more than one sample was available to
+  verify against, so the multi-sample paths are covered by synthetic CFBF
+  fixtures built with the `cfb` crate's own write API rather than guessed
+  at. (contributed by @Nabejo)
+
 - `Reader::iter_chromatograms` (Sigilweaver/OpenSXRaw#21): emits a single
   total ion current chromatogram (`MS:1000235`) built from the already-decoded
   `idx_records` - one point per record, `time_sec` from `retention_time_min`
