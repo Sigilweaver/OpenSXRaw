@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Reader::iter_spectra` no longer hardcodes `scan_mode: Some(ScanMode::Profile)`
+  for every spectrum (Sigilweaver/OpenSXRaw#27): that mislabeled centroided
+  SCIEX acquisitions as profile data. `scan_mode` is now left `None` instead.
+  No currently-decoded stream
+  (`Idx`, `DDERealTimeDataEx`, `SummaryInformation`) carries a per-scan or
+  per-experiment centroid/profile indicator to classify against, and per the
+  project's clean-room policy this reader does not guess at one without a
+  verified source - see the doc comment above the `scan_mode` field in
+  `reader.rs` for the streams checked and ruled out. Finding the real
+  indicator (if one exists in an undecoded stream) is tracked as follow-up
+  work. (contributed by @Nabejo)
+
 ### Added
 
 - `Reader::list_samples` and `Reader::open_sample` (#25): a `.wiff`

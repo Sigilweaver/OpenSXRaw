@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use cfb::CompoundFile;
 use openmassspec_core::{
-    Analyzer, ChromatogramRecord, CvTerm, PrecursorInfo, RunMetadata, ScanMode, SpectrumRecord,
+    Analyzer, ChromatogramRecord, CvTerm, PrecursorInfo, RunMetadata, SpectrumRecord,
     SpectrumSource,
 };
 
@@ -476,7 +476,41 @@ impl SpectrumSource for Reader {
                         // variant, so `Option::None` is the correct way to
                         // represent "not determined" here.
                         polarity: None,
-                        scan_mode: Some(ScanMode::Profile),
+                        // Left unset rather than asserting `Profile` for every
+                        // scan (issue #27): that was wrong whenever the
+                        // source acquisition is actually centroided, and none
+                        // of the streams already decoded here carry a
+                        // per-scan or per-experiment centroid/profile
+                        // indicator to replace it with. Checked and ruled out
+                        // for this: the Idx record's byte 0x11 ("Unknown",
+                        // always observed as 0x00 - see `raw::idx`), the 64
+                        // unidentified trailing bytes of each
+                        // `DDERealTimeDataEx` record (see `raw::dde`), and the
+                        // `SummaryInformation`/`DocumentSummaryInformation`
+                        // property sets (see `raw::summary_info`) - none
+                        // distinguish centroid from profile scans in the
+                        // fixtures available in this pass. A structural
+                        // heuristic based on the decoded token stream itself
+                        // (e.g. regular fixed-grid deltas vs. sparse isolated
+                        // peaks) was considered but rejected: with no known-
+                        // centroid/known-profile ground truth to validate it
+                        // against, promoting it to real output would be
+                        // exactly the kind of unverified guess the project's
+                        // clean-room policy rules out. Finding the actual
+                        // indicator (if one exists in an undecoded stream) is
+                        // open follow-up work.
+                        //
+                        // Note this does not fully resolve the mzML-level
+                        // symptom: `openmassspec_core`'s mzML writer treats
+                        // any `scan_mode` other than `Some(ScanMode::Centroid)`
+                        // (including `None`) as profile spectrum
+                        // (`MS:1000128`) for cvParam purposes. Leaving this
+                        // `None` stops OpenSXRaw from asserting a specific
+                        // mode it cannot actually verify, but does not by
+                        // itself relabel centroided acquisitions as centroid
+                        // in the mzML output - that requires the indicator
+                        // above to be found first.
+                        scan_mode: None,
                         analyzer: Some(Analyzer::TOFMS),
                         filter: None,
                         retention_time_sec: rec.retention_time_min as f64 * 60.0,
@@ -623,6 +657,25 @@ mod tests {
         assert_eq!(chroms.len(), 1);
         assert_eq!(chroms[0].time_sec, vec![60.0]);
         assert_eq!(chroms[0].intensity, vec![1_234_567.0]);
+    }
+
+    #[test]
+    fn iter_spectra_leaves_scan_mode_unset() {
+        // Regression guard for issue #27: scan_mode must not assert a
+        // specific mode (it used to be hardcoded to `Profile` for every
+        // spectrum, which mislabeled centroided SCIEX acquisitions) since no
+        // decoded stream currently carries a reliable per-scan or
+        // per-experiment centroid/profile indicator - see the doc comment on
+        // `iter_spectra`'s `SpectrumRecord` construction.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.1, 2, 50.0)]);
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 2);
+        for spectrum in &spectra {
+            assert!(
+                spectrum.scan_mode.is_none(),
+                "scan_mode must be None, not an unverified guess"
+            );
+        }
     }
 
     fn point(raw_mz_bin: u32, raw_intensity: u32) -> ScanPoint {
