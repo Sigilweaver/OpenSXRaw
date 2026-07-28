@@ -435,6 +435,46 @@ impl SpectrumSource for Reader {
                         scan_number: (idx + 1) as u32,
                         native_id,
                         ms_level: rec.ms_level,
+                        // Investigated for issue #26 ("polarity hardcoded to
+                        // None for every spectrum") and still `None`: no
+                        // stream this reader currently decodes carries a
+                        // per-scan or per-run polarity signal.
+                        //
+                        // - `raw::summary_info` (`SummaryInformation`/
+                        //   `DocumentSummaryInformation`): only the OLE
+                        //   creation timestamp and free-text author/company
+                        //   fields - no polarity property.
+                        // - `raw::calibration` (`TOFCalibrationData`): only
+                        //   the linear (slope, intercept) m/z pair.
+                        // - `raw::dde` (`DDERealTimeDataEx`): only a
+                        //   precursor m/z per DDA cycle.
+                        // - `raw::idx` (`Idx` record): the two "Unknown"
+                        //   bytes (0x08, 0x11) were checked by issue #7 while
+                        //   chasing a different bug and found uniformly zero
+                        //   across ~97k records of a multi-Experiment
+                        //   (SWATH/DDA) corpus fixture - not a varying
+                        //   per-scan flag of any kind, polarity included.
+                        // - `raw::scan` (`.wiff.scan` block payload): a pure
+                        //   m/z/intensity token stream, no header fields.
+                        //
+                        // On this instrument family, polarity is a method
+                        // setting recorded per-Experiment (SCIEX
+                        // `MethodSubtree/Method1/DeviceMethod0/PeriodN/
+                        // ExperimentN/ExperimentHeader(Ex)`), which this
+                        // reader does not decode at all yet - that binary
+                        // struct's layout is an open question, not something
+                        // ruled out. Populating this field would require
+                        // decoding that struct and correlating each scan back
+                        // to its owning Experiment, clean-room, against
+                        // corpus fixtures; per CONTRIBUTING's "don't guess"
+                        // policy, `None` (this reader's existing
+                        // "not resolved" convention, matching
+                        // `instrument_serial_number` and
+                        // `mobility_array_kind` elsewhere in this file) is
+                        // left in place rather than fabricating a decode.
+                        // `openmassspec_core::Polarity` has no `Unknown`
+                        // variant, so `Option::None` is the correct way to
+                        // represent "not determined" here.
                         polarity: None,
                         scan_mode: Some(ScanMode::Profile),
                         analyzer: Some(Analyzer::TOFMS),
