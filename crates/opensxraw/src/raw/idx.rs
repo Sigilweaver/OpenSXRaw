@@ -20,6 +20,18 @@
 //! | 0x12   | f64     | Total Ion Current (cps, not raw counts)     |
 //! | 0x1A   | f64     | Secondary field (grid-spacing related)      |
 //! | 0x22   | [u8;20] | Zero padding                                |
+//!
+//! # Polarity (issue #26)
+//!
+//! Neither "Unknown" byte above is a per-record polarity flag: issue #7's
+//! investigation of the 0x08/0x11 fields (chasing a different bug, the
+//! ms_level flag being wrong for multi-Experiment SWATH/DDA acquisitions)
+//! found both uniformly zero across all ~97k records of a multi-Experiment
+//! corpus fixture (`PXD054774/DDA2.wiff`), which rules them out as carrying
+//! any varying per-scan signal, polarity included. See the polarity
+//! investigation note on `SpectrumRecord.polarity` in `reader.rs` for where
+//! polarity most likely does live instead (undecoded per-Experiment method
+//! headers) and why it isn't populated here.
 
 use byteorder::{ByteOrder, LittleEndian};
 
