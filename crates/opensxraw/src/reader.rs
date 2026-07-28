@@ -15,24 +15,55 @@ use crate::raw::idx::IdxRecord;
 use crate::raw::scan::{read_scan_block, ScanPoint};
 use crate::raw::summary_info::parse_create_timestamp;
 
-/// The CFBF stream path for the scan index in a single-sample file.
-const IDX_STREAM: &str = "SampleSubtree/Sample1/Idx";
+/// The CFBF storage under which each sample's data lives, one child storage
+/// per sample (`Sample1`, `Sample2`, ...). A `.wiff` file can hold more than
+/// one sample (see Sigilweaver/OpenSXRaw#25); `Reader::list_samples`
+/// enumerates the child storages actually present so callers aren't limited
+/// to whatever `Reader::open` picks by default.
+const SAMPLE_SUBTREE_STORAGE: &str = "SampleSubtree";
+
+/// The CFBF stream path for the scan index of the given sample.
+fn idx_stream(sample: &str) -> String {
+    format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/Idx")
+}
 
 /// The CFBF stream path for the standard OLE SummaryInformation property
 /// set. The leading `\x05` is the OLE convention marking a stream name as
 /// reserved/special rather than user data. See `raw::summary_info` for the
-/// investigation behind using this as the acquisition start timestamp.
+/// investigation behind using this as the acquisition start timestamp. This
+/// stream lives at the container root rather than under a sample's storage.
 const SUMMARY_INFO_STREAM: &str = "\x05SummaryInformation";
 
-/// The CFBF stream path for TOF m/z calibration constants. Only present on
-/// TripleTOF-family acquisitions - see `raw::calibration` and
-/// `docs/format/04-legacy-wiff-calibration.md`.
-const CALIBRATION_STREAM: &str = "SampleSubtree/Sample1/TOFCalibrationData";
+/// The CFBF stream path for TOF m/z calibration constants of the given
+/// sample. Only present on TripleTOF-family acquisitions - see
+/// `raw::calibration` and `docs/format/04-legacy-wiff-calibration.md`.
+fn calibration_stream(sample: &str) -> String {
+    format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/TOFCalibrationData")
+}
 
-/// The CFBF stream path for data-dependent precursor selection records.
-/// Only present on files with IDA/DDA-style precursor triggering - see
-/// `raw::dde` and `docs/format/04-legacy-wiff-calibration.md`.
-const DDE_STREAM: &str = "SampleSubtree/Sample1/DDERealTimeDataEx";
+/// The CFBF stream path for data-dependent precursor selection records of
+/// the given sample. Only present on files with IDA/DDA-style precursor
+/// triggering - see `raw::dde` and `docs/format/04-legacy-wiff-calibration.md`.
+fn dde_stream(sample: &str) -> String {
+    format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/DDERealTimeDataEx")
+}
+
+/// Order sample subtree names so the common `SampleN` convention sorts
+/// numerically (`Sample2` before `Sample10`) rather than lexicographically,
+/// which is how the CFBF directory itself orders them internally. Names
+/// that don't fit the `Sample<digits>` pattern sort after ones that do, in
+/// alphabetical order.
+fn sort_sample_names(names: &mut [String]) {
+    names.sort_by_key(|name| {
+        match name
+            .strip_prefix("Sample")
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            Some(n) => (0u8, n, String::new()),
+            None => (1u8, 0u64, name.clone()),
+        }
+    });
+}
 
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
@@ -59,11 +90,83 @@ pub struct Reader {
 }
 
 impl Reader {
+    /// List the sample subtree names present in a `.wiff` file's
+    /// `SampleSubtree` storage, e.g. `["Sample1"]` for the common
+    /// single-sample case, or `["Sample1", "Sample2"]` when the container
+    /// holds more than one sample (see Sigilweaver/OpenSXRaw#25). The
+    /// returned names are sorted numerically by their trailing digits (see
+    /// `sort_sample_names`) and are suitable to pass straight to
+    /// `Reader::open_sample`.
+    ///
+    /// This only opens the `.wiff` container and walks its directory
+    /// structure - it does not read or decode any sample's data.
+    pub fn list_samples<P: AsRef<Path>>(wiff_path: P) -> crate::Result<Vec<String>> {
+        let wiff_path = wiff_path.as_ref();
+        let wiff_file = std::fs::File::open(wiff_path)?;
+        let comp = CompoundFile::open(wiff_file)?;
+
+        let mut names: Vec<String> = comp
+            .read_storage(SAMPLE_SUBTREE_STORAGE)
+            .map_err(|e| {
+                crate::Error::Parse(format!(
+                    "storage '{SAMPLE_SUBTREE_STORAGE}' not found in {}: {}",
+                    wiff_path.display(),
+                    e
+                ))
+            })?
+            .filter(|entry| entry.is_storage())
+            .map(|entry| entry.name().to_string())
+            .collect();
+
+        sort_sample_names(&mut names);
+        Ok(names)
+    }
+
     /// Open a `.wiff` file and its paired `.wiff.scan` file.
     ///
     /// `wiff_path` is the path to the `.wiff` file. The `.wiff.scan` file is
     /// expected at the same path with `.scan` appended.
+    ///
+    /// A `.wiff` container can hold more than one sample (see
+    /// Sigilweaver/OpenSXRaw#25). This constructor only supports the
+    /// common single-sample case: if `list_samples` finds more than one
+    /// sample subtree, this returns an error rather than silently reading
+    /// just one of them - use `Reader::open_sample` to pick a specific
+    /// sample explicitly.
     pub fn open<P: AsRef<Path>>(wiff_path: P) -> crate::Result<Self> {
+        let wiff_path = wiff_path.as_ref();
+        let samples = Self::list_samples(wiff_path)?;
+
+        let sample = match samples.as_slice() {
+            [] => {
+                return Err(crate::Error::Parse(format!(
+                    "no sample subtrees found under '{SAMPLE_SUBTREE_STORAGE}' in {}",
+                    wiff_path.display()
+                )));
+            }
+            [only] => only.clone(),
+            multiple => {
+                return Err(crate::Error::Parse(format!(
+                    "{} contains {} samples ({}); Reader::open only supports a \
+                     single-sample file - use Reader::open_sample to pick one",
+                    wiff_path.display(),
+                    multiple.len(),
+                    multiple.join(", ")
+                )));
+            }
+        };
+
+        Self::open_sample(wiff_path, &sample)
+    }
+
+    /// Open a specific sample within a `.wiff` file and its paired
+    /// `.wiff.scan` file.
+    ///
+    /// `wiff_path` is the path to the `.wiff` file. The `.wiff.scan` file is
+    /// expected at the same path with `.scan` appended. `sample` is a
+    /// sample subtree name as returned by `Reader::list_samples` (e.g.
+    /// `"Sample1"`, `"Sample2"`).
+    pub fn open_sample<P: AsRef<Path>>(wiff_path: P, sample: &str) -> crate::Result<Self> {
         let wiff_path = wiff_path.as_ref();
 
         // Build .wiff.scan path: append ".scan" to the .wiff extension.
@@ -93,9 +196,10 @@ impl Reader {
         let mut comp = CompoundFile::open(wiff_file)?;
 
         // Read the Idx stream.
+        let idx_path = idx_stream(sample);
         let idx_data = {
-            let mut stream = comp.open_stream(IDX_STREAM).map_err(|e| {
-                crate::Error::Parse(format!("Stream '{}' not found: {}", IDX_STREAM, e))
+            let mut stream = comp.open_stream(&idx_path).map_err(|e| {
+                crate::Error::Parse(format!("Stream '{}' not found: {}", idx_path, e))
             })?;
             let mut buf = Vec::new();
             stream.read_to_end(&mut buf)?;
@@ -120,19 +224,19 @@ impl Reader {
 
         // Read TOF calibration constants, if present. Absent on QTRAP-only
         // files - see `raw::calibration`.
-        let calibration = comp
-            .open_stream(CALIBRATION_STREAM)
-            .ok()
-            .and_then(|mut stream| {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).ok()?;
-                Calibration::from_bytes(&buf)
-            });
+        let calibration =
+            comp.open_stream(calibration_stream(sample))
+                .ok()
+                .and_then(|mut stream| {
+                    let mut buf = Vec::new();
+                    stream.read_to_end(&mut buf).ok()?;
+                    Calibration::from_bytes(&buf)
+                });
 
         // Read DDA precursor-selection records, if present. Absent on files
         // without IDA/DDA-style precursor triggering - see `raw::dde`.
         let dde_records = comp
-            .open_stream(DDE_STREAM)
+            .open_stream(dde_stream(sample))
             .ok()
             .map(|mut stream| {
                 let mut buf = Vec::new();
@@ -520,5 +624,169 @@ mod tests {
         let (mz, intensity) = points_to_arrays(vec![], None);
         assert!(mz.is_empty());
         assert!(intensity.is_empty());
+    }
+
+    // --- Multi-sample support (Sigilweaver/OpenSXRaw#25) ---
+    //
+    // These build minimal synthetic CFBF files with the `cfb` crate's own
+    // write API (a public, non-SCIEX-specific container format) rather than
+    // relying on the out-of-tree corpus, so they run everywhere. No SCIEX
+    // format knowledge beyond what's already used elsewhere in this module
+    // (the `SampleSubtree/<Sample>/Idx` stream layout) is needed.
+
+    use crate::raw::idx::{IDX_RECORD_SIZE, IDX_STREAM_HEADER};
+    use byteorder::{ByteOrder, LittleEndian};
+    use std::io::Write;
+
+    /// One 54-byte Idx record with a real (non-placeholder) block, encoding
+    /// `scan_offset` so tests can tell which sample's Idx stream was read.
+    fn idx_record_bytes(scan_offset: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; IDX_RECORD_SIZE];
+        LittleEndian::write_u32(&mut buf[0x00..0x04], scan_offset);
+        LittleEndian::write_u32(&mut buf[0x04..0x08], 200); // scan_size, > 56
+        buf[0x10] = 1; // ms_level flag: MS1
+        buf
+    }
+
+    /// Builds a synthetic `.wiff` CFBF file at a uniquely-named path under
+    /// the OS temp dir, with one `SampleSubtree/<name>/Idx` stream per
+    /// entry in `samples`, and returns the `.wiff` path. Each sample's Idx
+    /// stream holds one valid record whose `scan_offset` is `1000 * (1 +
+    /// position in `samples`)`, so callers can verify which sample got
+    /// loaded. Also writes an empty paired `.wiff.scan` file, since
+    /// `Reader::open`/`open_sample` require it to exist (its contents don't
+    /// matter here - only `idx_records`, populated at `open` time, is
+    /// exercised by these tests, not lazy scan-block decoding).
+    fn write_synthetic_wiff(name: &str, samples: &[&str]) -> PathBuf {
+        let mut wiff_path = std::env::temp_dir();
+        wiff_path.push(format!(
+            "opensxraw_test_{}_{}.wiff",
+            std::process::id(),
+            name
+        ));
+        let mut scan_path = wiff_path.clone();
+        scan_path.set_file_name(format!(
+            "{}.scan",
+            wiff_path.file_name().unwrap().to_string_lossy()
+        ));
+
+        let file = std::fs::File::create(&wiff_path).unwrap();
+        let mut comp = cfb::CompoundFile::create(file).unwrap();
+        comp.create_storage(SAMPLE_SUBTREE_STORAGE).unwrap();
+        for (i, sample) in samples.iter().enumerate() {
+            let storage = format!("{SAMPLE_SUBTREE_STORAGE}/{sample}");
+            comp.create_storage(&storage).unwrap();
+
+            let mut idx_data = vec![0u8; IDX_STREAM_HEADER];
+            idx_data.extend(idx_record_bytes(1000 * (i as u32 + 1)));
+
+            let mut stream = comp.create_stream(idx_stream(sample)).unwrap();
+            stream.write_all(&idx_data).unwrap();
+        }
+        comp.flush().unwrap();
+        drop(comp);
+
+        std::fs::write(&scan_path, b"placeholder").unwrap();
+        wiff_path
+    }
+
+    fn remove_synthetic_wiff(wiff_path: &Path) {
+        std::fs::remove_file(wiff_path).ok();
+        let mut scan_path = wiff_path.to_path_buf();
+        scan_path.set_file_name(format!(
+            "{}.scan",
+            wiff_path.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::remove_file(&scan_path).ok();
+    }
+
+    #[test]
+    fn sort_sample_names_orders_numerically_not_lexicographically() {
+        let mut names = vec![
+            "Sample10".to_string(),
+            "Sample2".to_string(),
+            "Sample1".to_string(),
+        ];
+        sort_sample_names(&mut names);
+        assert_eq!(names, vec!["Sample1", "Sample2", "Sample10"]);
+    }
+
+    #[test]
+    fn sort_sample_names_puts_non_matching_names_last_alphabetically() {
+        let mut names = vec![
+            "Zzz".to_string(),
+            "Sample2".to_string(),
+            "Aaa".to_string(),
+            "Sample1".to_string(),
+        ];
+        sort_sample_names(&mut names);
+        assert_eq!(names, vec!["Sample1", "Sample2", "Aaa", "Zzz"]);
+    }
+
+    #[test]
+    fn list_samples_finds_single_sample() {
+        let path = write_synthetic_wiff("list_single", &["Sample1"]);
+        let samples = Reader::list_samples(&path).unwrap();
+        remove_synthetic_wiff(&path);
+        assert_eq!(samples, vec!["Sample1"]);
+    }
+
+    #[test]
+    fn list_samples_finds_multiple_samples_in_numeric_order() {
+        let path = write_synthetic_wiff("list_multi", &["Sample2", "Sample1", "Sample3"]);
+        let samples = Reader::list_samples(&path).unwrap();
+        remove_synthetic_wiff(&path);
+        assert_eq!(samples, vec!["Sample1", "Sample2", "Sample3"]);
+    }
+
+    #[test]
+    fn open_succeeds_on_single_sample_file() {
+        let path = write_synthetic_wiff("open_single", &["Sample1"]);
+        let reader = Reader::open(&path).unwrap();
+        remove_synthetic_wiff(&path);
+        assert_eq!(reader.idx_records.len(), 1);
+        assert_eq!(reader.idx_records[0].scan_offset, 1000);
+    }
+
+    #[test]
+    fn open_errors_clearly_on_multi_sample_file_instead_of_silently_truncating() {
+        // Regression test for Sigilweaver/OpenSXRaw#25: previously the
+        // hardcoded Sample1 path meant a multi-sample file would silently
+        // read only its first sample, with no error or warning that
+        // Sample2's data was skipped entirely. `open` must now refuse this
+        // rather than pick one on the caller's behalf.
+        let path = write_synthetic_wiff("open_multi", &["Sample1", "Sample2"]);
+        let err = Reader::open(&path).err().unwrap();
+        remove_synthetic_wiff(&path);
+        let message = err.to_string();
+        assert!(
+            message.contains("Sample1") && message.contains("Sample2"),
+            "error should name the samples found, got: {message}"
+        );
+    }
+
+    #[test]
+    fn open_sample_reads_the_requested_sample_not_just_the_first() {
+        let path = write_synthetic_wiff("open_sample_second", &["Sample1", "Sample2"]);
+        let reader = Reader::open_sample(&path, "Sample2").unwrap();
+        remove_synthetic_wiff(&path);
+        assert_eq!(reader.idx_records.len(), 1);
+        assert_eq!(reader.idx_records[0].scan_offset, 2000);
+    }
+
+    #[test]
+    fn open_errors_when_sample_subtree_storage_is_missing() {
+        let mut wiff_path = std::env::temp_dir();
+        wiff_path.push(format!(
+            "opensxraw_test_{}_no_sample_subtree.wiff",
+            std::process::id()
+        ));
+        let file = std::fs::File::create(&wiff_path).unwrap();
+        cfb::CompoundFile::create(file).unwrap().flush().unwrap();
+        std::fs::write(format!("{}.scan", wiff_path.display()), b"x").unwrap();
+
+        let err = Reader::open(&wiff_path).err().unwrap();
+        remove_synthetic_wiff(&wiff_path);
+        assert!(err.to_string().contains(SAMPLE_SUBTREE_STORAGE));
     }
 }
