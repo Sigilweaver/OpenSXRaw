@@ -319,6 +319,15 @@ impl SpectrumSource for Reader {
             instrument_serial_number: None,
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
+            // No Analyst acquisition software version is wired up here: the
+            // only candidate source is the `DocumentSummaryInformation`
+            // stream's "Analyst file type: Data file, Analyst <version>"
+            // free-text string noted in `raw::summary_info`'s module doc
+            // (Round 2 survey) - that stream isn't parsed anywhere in this
+            // crate yet, so there is nothing to wire in without new parsing
+            // work.
+            acquisition_software_name: None,
+            acquisition_software_version: None,
             start_timestamp: self.start_timestamp.clone(),
             mobility_array_kind: None,
             analyzers: Vec::new(),
