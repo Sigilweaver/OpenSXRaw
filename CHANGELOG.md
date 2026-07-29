@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Adapted `RunMetadata` construction to `openmassspec-core` 1.4.0's new
+  `acquisition_software_name`/`acquisition_software_version` fields
+  (defaulted to `None`: no stream this reader currently decodes carries a
+  parsed Analyst software version - `raw::summary_info`'s module doc notes
+  `DocumentSummaryInformation` has a candidate free-text string, but that
+  stream isn't parsed here yet). Bumped the declared `openmassspec-core`
+  minimum to `"1.4.0"` to match. (Sigilweaver/OpenSXRaw#31)
 - `Reader::iter_spectra` no longer hardcodes `scan_mode: Some(ScanMode::Profile)`
   for every spectrum (Sigilweaver/OpenSXRaw#27): that mislabeled centroided
   SCIEX acquisitions as profile data. `scan_mode` is now left `None` instead.
