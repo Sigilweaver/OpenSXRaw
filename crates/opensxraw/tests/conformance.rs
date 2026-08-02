@@ -8,20 +8,36 @@ use openmassspec_core::SpectrumSource;
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
 
-fn fixture_wiff() -> PathBuf {
-    PathBuf::from("/workspaces/Projects/Data/SRaw/PXD022088/Rcor2KOESC1.wiff")
+fn fixture_wiff_candidates() -> Vec<PathBuf> {
+    vec![
+        // CI / repo-root corpus dir (gitignored; populated by ci.yml's
+        // "Download corpus fixture for conformance tests" step). This is
+        // the one CI actually uses. The `.wiff.scan` sibling is downloaded
+        // alongside it into the same directory.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/PXD022088/Rcor2KOESC1.wiff"),
+        // Local dev out-of-tree corpus checkout (see CORPUS.md).
+        PathBuf::from("/workspaces/Projects/Data/SRaw/PXD022088/Rcor2KOESC1.wiff"),
+    ]
 }
 
 /// Open the corpus fixture, or return `None` (with a skip message) when it
-/// is absent - the corpus lives out of tree, so these tests skip cleanly on
-/// CI runners instead of failing the build.
+/// is absent from every candidate location - the corpus mostly lives out of
+/// tree, so these tests skip cleanly rather than failing the build when
+/// neither the CI-downloaded nor the local-dev copy is present.
 fn open_fixture_or_skip() -> Option<Reader> {
-    let path = fixture_wiff();
-    if !path.exists() {
-        eprintln!("skip: corpus not present at {}", path.display());
+    let candidates = fixture_wiff_candidates();
+    let Some(path) = candidates.iter().find(|p| p.exists()) else {
+        eprintln!(
+            "skip: corpus not present at any of: {}",
+            candidates
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         return None;
-    }
-    Some(Reader::open(&path).expect("Reader::open failed"))
+    };
+    Some(Reader::open(path).expect("Reader::open failed"))
 }
 
 #[test]

@@ -3,11 +3,10 @@
 # Jobs:
 #   build - cargo fmt --check, cargo clippy -D warnings, cargo test
 #           (Linux + macOS + Windows, mirroring publish.yml's wheel matrix)
-#
-# There is no corpus-download validation job yet. The conformance tests
-# (crates/opensxraw/tests/conformance.rs) run against a real corpus fixture
-# that lives out of tree, so they skip cleanly when the corpus is absent -
-# as it is on CI. Matches the sibling readers' single-fixture stage.
+#           Downloads a small corpus fixture (the PXD022088/Rcor2KOESC1
+#           `.wiff` + `.wiff.scan` pair) ahead of `cargo test` so
+#           crates/opensxraw/tests/conformance.rs exercises a real decode
+#           path instead of always skipping - see Sigilweaver/OpenSXRaw#33.
 
 name: CI
 
@@ -52,6 +51,18 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Download corpus fixture for conformance tests
+        shell: bash
+        run: |
+          mkdir -p corpus/PXD022088
+          curl -sSL --user-agent "OpenSXRaw-CI/1.0" \
+            -o corpus/PXD022088/Rcor2KOESC1.wiff \
+            "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff"
+          curl -sSL --user-agent "OpenSXRaw-CI/1.0" \
+            -o corpus/PXD022088/Rcor2KOESC1.wiff.scan \
+            "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff.scan"
+          echo "Downloaded $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff | cut -f1) .wiff + $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff.scan | cut -f1) .wiff.scan"
 
       - name: cargo test
         run: cargo test --workspace --all-targets

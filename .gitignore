@@ -5,6 +5,10 @@ re/
 /target/
 **/Cargo.lock
 
+# Corpus fixtures pulled on demand (e.g. by CI, see .github/workflows/ci.yml)
+# for conformance testing - not redistributed through this repo.
+/corpus/
+
 # Editor / OS
 .DS_Store
 *.swp
