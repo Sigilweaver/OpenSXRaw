@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI now downloads the `PXD022088/Rcor2KOESC1` `.wiff` + `.wiff.scan` pair
+  from PRIDE ahead of `cargo test`, so `crates/opensxraw/tests/conformance.rs`
+  exercises a real decode path in CI instead of always skipping.
+  (Sigilweaver/OpenSXRaw#33)
+
 ## [0.2.4] - 2026-07-29
 
 ### Fixed
