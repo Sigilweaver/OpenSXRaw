@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Reader::iter_spectra` no longer hardcodes `analyzer: Some(Analyzer::TOFMS)`
+  for every spectrum: TOF-only was wrong for the QTRAP/QQQ fixtures in the
+  corpus. `analyzer` now resolves per file to `TOFMS` when
+  `TOFCalibrationData` parses to a real calibration (TripleTOF/ZenoTOF
+  family) or `TQMS` (triple quadrupole - the closest available
+  `openmassspec_core::Analyzer` variant) otherwise. Verified against the
+  full local corpus (200 `.wiff` files): the calibration-presence signal
+  agrees, file-for-file, with two independent structural signals
+  (`ExperimentTOF`/`ExperimentHeaderFJ` stream presence) and with every
+  corpus file's embedded free-text instrument name. (Sigilweaver/OpenSXRaw#8)
+- `SpectrumRecord.polarity` is no longer hardcoded to `None` for every
+  spectrum. It now resolves from the acquisition method's ion spray voltage
+  (`IonSourceParamsTable`'s `ISVF`/`IS` parameter, newly decoded in
+  `raw::ion_source`): a positive voltage means positive-mode, negative means
+  negative-mode, per standard electrospray ionization physics. Every file in
+  the local corpus (200 `.wiff` files, 23 PRIDE projects) resolves to
+  `Positive`; no negative-mode fixture exists locally to verify that branch
+  against a real file, so it rests on ESI physics and self-consistency
+  rather than corpus confirmation - see the doc comments on
+  `find_ion_spray_voltage` in `reader.rs` and the module doc on
+  `raw::ion_source`. (Sigilweaver/OpenSXRaw#26)
+
 ### Added
 
 - CI now downloads the `PXD022088/Rcor2KOESC1` `.wiff` + `.wiff.scan` pair
@@ -39,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mislabeled the `PXD022088/Rcor2KOESC1` fixture as "TripleTOF" - it is
   actually a QTRAP 6500+ acquisition (no `TOFCalibrationData` stream, and now
   confirmed by its `Log` stream self-identification record).
+
+### Removed
+
+- Removed `raw::read_bytes`, an unused helper with zero callers anywhere in
+  the workspace (the one place that reads raw file bytes at an offset,
+  `raw::scan::read_scan_block`, needs a bounded best-effort read that
+  tolerates a short read, which `read_bytes`'s strict `read_exact` semantics
+  don't match, so there was no clean call site to wire it into instead).
+  (Sigilweaver/OpenSXRaw#8)
 
 ## [0.2.4] - 2026-07-29
 
