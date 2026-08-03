@@ -5,11 +5,14 @@
 //! Previously mislabeled "TripleTOF 5600" here - corrected per the
 //! `Log` stream self-identification record found for issue #4 (see
 //! `raw::instrument_log`), which agrees with this file's lack of a
-//! `TOFCalibrationData` stream (see `test_calibrated_mz_is_physically_plausible`
-//! below, which uses a different, TripleTOF fixture for that reason).
+//! `TOFCalibrationData` stream and `ExperimentTOF` method stream (issue #8's
+//! TOF-vs-quad/trap analyzer family signal - see `raw::calibration`) and
+//! with this file's free-text "Monash_6500" instrument-name hint.
+//! `test_calibrated_mz_is_physically_plausible` below uses a different,
+//! TripleTOF fixture for the calibrated-m/z path.
 
 use openmassspec_core::conformance::assert_source_invariants;
-use openmassspec_core::SpectrumSource;
+use openmassspec_core::{Analyzer, Polarity, SpectrumSource};
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
 
@@ -235,6 +238,24 @@ fn calibrated_fixture_wiff() -> PathBuf {
 }
 
 #[test]
+fn test_qtrap_fixture_gets_tqms_and_positive_polarity() {
+    // Issues #8/#26: the main fixture is QTRAP 6500 (no TOFCalibrationData,
+    // no ExperimentTOF stream - see the module doc on `raw::calibration`),
+    // so every spectrum should get TQMS, and its ISVF/IS ion spray voltage
+    // is positive (verified across the full local corpus - see
+    // `raw::ion_source`), so polarity should resolve to Positive.
+    let Some(mut reader) = open_fixture_or_skip() else {
+        return;
+    };
+    let spectra: Vec<_> = reader.iter_spectra().collect();
+    assert!(!spectra.is_empty());
+    for s in &spectra {
+        assert_eq!(s.analyzer, Some(Analyzer::TQMS));
+        assert_eq!(s.polarity, Some(Polarity::Positive));
+    }
+}
+
+#[test]
 fn test_calibrated_mz_is_physically_plausible() {
     let path = calibrated_fixture_wiff();
     if !path.exists() {
@@ -261,5 +282,25 @@ fn test_calibrated_mz_is_physically_plausible() {
             "spectrum {} has max mz {max_mz}, expected a calibrated value under 5000 Da",
             s.native_id
         );
+    }
+}
+
+#[test]
+fn test_tripletof_fixture_gets_tofms_and_positive_polarity() {
+    // Issues #8/#26: this fixture has a real TOFCalibrationData stream
+    // (TripleTOF-family), so every spectrum should get TOFMS, and its ISVF
+    // ion spray voltage is positive, so polarity should resolve to Positive
+    // - same corpus-wide invariant as the QTRAP fixture above.
+    let path = calibrated_fixture_wiff();
+    if !path.exists() {
+        eprintln!("skip: corpus not present at {}", path.display());
+        return;
+    }
+    let mut reader = Reader::open(&path).expect("Reader::open failed");
+    let spectra: Vec<_> = reader.iter_spectra().collect();
+    assert!(!spectra.is_empty());
+    for s in &spectra {
+        assert_eq!(s.analyzer, Some(Analyzer::TOFMS));
+        assert_eq!(s.polarity, Some(Polarity::Positive));
     }
 }

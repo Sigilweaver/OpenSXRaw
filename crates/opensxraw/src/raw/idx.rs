@@ -28,10 +28,10 @@
 //! ms_level flag being wrong for multi-Experiment SWATH/DDA acquisitions)
 //! found both uniformly zero across all ~97k records of a multi-Experiment
 //! corpus fixture (`PXD054774/DDA2.wiff`), which rules them out as carrying
-//! any varying per-scan signal, polarity included. See the polarity
-//! investigation note on `SpectrumRecord.polarity` in `reader.rs` for where
-//! polarity most likely does live instead (undecoded per-Experiment method
-//! headers) and why it isn't populated here.
+//! any varying per-scan signal, polarity included. Polarity is instead read
+//! from the per-Experiment `IonSourceParamsTable` ion spray voltage - see
+//! `raw::ion_source` and the polarity note on `SpectrumRecord.polarity` in
+//! `reader.rs`.
 
 use byteorder::{ByteOrder, LittleEndian};
 

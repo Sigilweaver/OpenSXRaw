@@ -5,6 +5,21 @@
 //! files, which have no clean-room-derivable calibration source - see
 //! `docs/format/04-legacy-wiff-calibration.md` for the full investigation.
 //!
+//! # Also used as the TOF-vs-quad/trap analyzer family signal (issue #8)
+//!
+//! On QTRAP-only files the `TOFCalibrationData` stream still exists, but as
+//! an empty 32-byte header with no `(slope, intercept)` body, so
+//! `Calibration::from_bytes` correctly returns `None` for it (it requires at
+//! least 16 body bytes past the header). That makes `Calibration::from_bytes(..).is_some()`
+//! double as a reliable per-file analyzer-family discriminator, not just an
+//! m/z-conversion flag: verified across the full local corpus (200 `.wiff`
+//! files) against two independent structural signals
+//! (`MethodSubtree/Method1/DeviceMethod0/Period0/ExperimentN/ExperimentTOF`
+//! presence, and the complementary `ExperimentHeaderFJ` stream seen only on
+//! QTRAP-family experiments) and against every corpus file's embedded
+//! free-text instrument name, with zero disagreements. See the `analyzer`
+//! comment in `reader.rs`'s `iter_spectra` for the full writeup.
+//!
 //! # Stream layout (confirmed against corpus)
 //!
 //! - 32-byte stream header (opaque, skipped, same convention as `Idx`).
