@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from PRIDE ahead of `cargo test`, so `crates/opensxraw/tests/conformance.rs`
   exercises a real decode path in CI instead of always skipping.
   (Sigilweaver/OpenSXRaw#33)
+- `Reader::run_metadata` now resolves `instrument` to a specific PSI-MS CV
+  term (e.g. `MS:1002533` "TripleTOF 6600") and populates
+  `instrument_serial_number`, both parsed from the mass spectrometer's own
+  self-identification record in the `.wiff` container's `Log` stream, for
+  every model directly observed across the local corpus (QTRAP 5500/6500/
+  6500+, TripleTOF 5600/5600+/6600, ZenoTOF 7600). Unrecognized models still
+  fall back to the generic `MS:1000121` ("SCIEX instrument model") term
+  rather than guessing. See `raw::instrument_log`. (Sigilweaver/OpenSXRaw#4)
+
+### Fixed
+
+- `docs/format/02-legacy-wiff-scan.md` and `crates/opensxraw/tests/conformance.rs`
+  mislabeled the `PXD022088/Rcor2KOESC1` fixture as "TripleTOF" - it is
+  actually a QTRAP 6500+ acquisition (no `TOFCalibrationData` stream, and now
+  confirmed by its `Log` stream self-identification record).
 
 ## [0.2.4] - 2026-07-29
 
