@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from PRIDE ahead of `cargo test`, so `crates/opensxraw/tests/conformance.rs`
   exercises a real decode path in CI instead of always skipping.
   (Sigilweaver/OpenSXRaw#33)
+- `docs/format/05-legacy-wiff-method-tree.md`: new clean-room decode of the
+  `MethodSubtree/.../ExperimentN/MassRangeEx` parameter table format
+  (`DP`/`CE`/`EP`/`CXP`/etc., both the single-parameter-set and MRM/SRM
+  transition-list shapes) and the `IDA/IDA` rolling collision-energy formula
+  table. Confirms `record_index % n_experiments` as a stable MS1-survey
+  discriminator for genuine fixed-window SWATH acquisitions specifically,
+  and clarifies that `PXD054774/DDA2.wiff` (issue #7's original test file)
+  is actually variable-cycle Top-N IDA/DDA, not fixed-window SWATH, which is
+  why the position-mod-N heuristic failed there. No behavior change - not
+  wired into the reader yet; see the doc's "Why this isn't wired in yet"
+  section. (Sigilweaver/OpenSXRaw#7, Sigilweaver/OpenSXRaw#23)
 
 ## [0.2.4] - 2026-07-29
 
