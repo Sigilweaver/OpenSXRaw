@@ -3,6 +3,7 @@
 pub mod calibration;
 pub mod dde;
 pub mod idx;
+pub mod instrument_log;
 pub mod scan;
 pub mod summary_info;
 

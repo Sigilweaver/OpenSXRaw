@@ -1,7 +1,12 @@
 //! Conformance test against a real corpus fixture.
 //!
-//! Fixture: PXD022088/Rcor2KOESC1 - a TripleTOF 5600 DDA run (596 KB .wiff,
+//! Fixture: PXD022088/Rcor2KOESC1 - a QTRAP 6500+ DDA run (596 KB .wiff,
 //! 1.9 MB .wiff.scan). The smallest complete legacy pair in the corpus.
+//! Previously mislabeled "TripleTOF 5600" here - corrected per the
+//! `Log` stream self-identification record found for issue #4 (see
+//! `raw::instrument_log`), which agrees with this file's lack of a
+//! `TOFCalibrationData` stream (see `test_calibrated_mz_is_physically_plausible`
+//! below, which uses a different, TripleTOF fixture for that reason).
 
 use openmassspec_core::conformance::assert_source_invariants;
 use openmassspec_core::SpectrumSource;
@@ -53,6 +58,23 @@ fn test_start_timestamp_from_summary_info() {
     assert_eq!(
         metadata.start_timestamp.as_deref(),
         Some("2019-06-25T04:31:23.912Z")
+    );
+}
+
+#[test]
+fn test_instrument_model_from_log_stream() {
+    let Some(reader) = open_fixture_or_skip() else {
+        return;
+    };
+    let metadata = reader.run_metadata();
+    // The `.wiff` container's `Log` stream self-identification record
+    // (`raw::instrument_log`) resolves to a specific psi-ms.obo term
+    // instead of the generic "SCIEX instrument model" placeholder.
+    assert_eq!(metadata.instrument.accession, "MS:1002582");
+    assert_eq!(metadata.instrument.name, "QTRAP 6500+");
+    assert_eq!(
+        metadata.instrument_serial_number.as_deref(),
+        Some("CG22641612")
     );
 }
 
