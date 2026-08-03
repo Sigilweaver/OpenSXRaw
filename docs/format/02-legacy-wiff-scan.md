@@ -14,7 +14,9 @@ The `Idx` stream has the following structure:
 
 ### Index Record Layout (54 bytes)
 
-Based on analyzing the `Idx` stream of `Rcor2KOESC1.wiff` (TripleTOF) and correlating with `.wiff.scan`:
+Based on analyzing the `Idx` stream of `Rcor2KOESC1.wiff` (QTRAP 6500+ - see
+`raw::instrument_log`; previously mislabeled "TripleTOF" here) and
+correlating with `.wiff.scan`:
 
 | Offset | Type | Size | Description |
 |---|---|---|---|

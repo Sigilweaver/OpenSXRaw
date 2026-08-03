@@ -12,6 +12,7 @@ use openmassspec_core::{
 use crate::raw::calibration::Calibration;
 use crate::raw::dde::DdeRecord;
 use crate::raw::idx::IdxRecord;
+use crate::raw::instrument_log::{parse_instrument_info, resolve_cv_term, InstrumentInfo};
 use crate::raw::scan::{read_scan_block, ScanPoint};
 use crate::raw::summary_info::parse_create_timestamp;
 
@@ -48,6 +49,14 @@ fn dde_stream(sample: &str) -> String {
     format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/DDERealTimeDataEx")
 }
 
+/// The CFBF stream path for the acquisition device status log of the given
+/// sample, which (among other things) carries the mass spectrometer's own
+/// self-identification record - see `raw::instrument_log` for the issue #4
+/// round 3 investigation behind using this for the instrument model.
+fn log_stream(sample: &str) -> String {
+    format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/Log")
+}
+
 /// Order sample subtree names so the common `SampleN` convention sorts
 /// numerically (`Sample2` before `Sample10`) rather than lexicographically,
 /// which is how the CFBF directory itself orders them internally. Names
@@ -79,6 +88,11 @@ pub struct Reader {
     /// container's standard OLE `SummaryInformation` property set. `None`
     /// when that stream is absent or unparseable - see `raw::summary_info`.
     pub start_timestamp: Option<String>,
+    /// Mass spectrometer self-identification, read from the `Log` stream's
+    /// device status entries. `None` when that stream is absent, or present
+    /// but doesn't contain a recognizable identification record - see
+    /// `raw::instrument_log`.
+    instrument_info: Option<InstrumentInfo>,
     /// Linear m/z calibration constants read from `TOFCalibrationData`.
     /// `None` on files without that stream (e.g. QTRAP-only acquisitions),
     /// in which case `mz` arrays stay as raw uncalibrated bin values - see
@@ -222,6 +236,18 @@ impl Reader {
                 parse_create_timestamp(&buf)
             });
 
+        // Read the mass spectrometer's self-identification record from the
+        // Log stream, if present and recognizable. Optional metadata, same
+        // as `start_timestamp` above - see `raw::instrument_log`.
+        let instrument_info = comp
+            .open_stream(log_stream(sample))
+            .ok()
+            .and_then(|mut stream| {
+                let mut buf = Vec::new();
+                stream.read_to_end(&mut buf).ok()?;
+                parse_instrument_info(&buf)
+            });
+
         // Read TOF calibration constants, if present. Absent on QTRAP-only
         // files - see `raw::calibration`.
         let calibration =
@@ -256,6 +282,7 @@ impl Reader {
             idx_records,
             scan_file_size,
             start_timestamp,
+            instrument_info,
             calibration,
             dde_records,
         })
@@ -290,33 +317,35 @@ fn points_to_arrays(
 
 impl SpectrumSource for Reader {
     fn run_metadata(&self) -> RunMetadata {
+        // Issue #4 rounds 1-2 ruled out every CFBF stream that looked like a
+        // plausible home for a structured instrument model field - see
+        // `raw::summary_info`'s module doc ("Round 2") for the full list.
+        // Round 3 found the actual source: the mass spectrometer's own
+        // self-identification record in the `Log` stream (see
+        // `raw::instrument_log`), populated into `self.instrument_info` at
+        // `open_sample` time. `resolve_cv_term` maps its `Component ID`/
+        // `Component Id` value to a specific `psi-ms.obo` term for every
+        // model directly observed in the corpus; an unrecognized model (or
+        // a missing/unparseable `Log` stream) falls back to the generic
+        // `MS:1000121` ("SCIEX instrument model") placeholder rather than
+        // guessing.
+        let (instrument, instrument_serial_number) = match &self.instrument_info {
+            Some(info) => {
+                let instrument = match resolve_cv_term(&info.component_id) {
+                    Some((accession, name)) => CvTerm::new(accession, name),
+                    None => CvTerm::new("MS:1000121", "SCIEX instrument model"),
+                };
+                (instrument, info.serial_number.clone())
+            }
+            None => (CvTerm::new("MS:1000121", "SCIEX instrument model"), None),
+        };
+
         RunMetadata {
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
             native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
-            // Still a generic placeholder, not resolved per-file: no CFBF
-            // stream was found carrying a vendor-populated instrument model
-            // string. The only candidate text (SummaryInformation's
-            // author/comments fields, CFR_INFO) is Analyst's free-text
-            // "instrument name" plus the acquisition PC's hostname, both
-            // configured per-site rather than written by the instrument
-            // firmware - see `raw::summary_info`'s module doc for the
-            // corpus evidence this isn't reliable enough to promote to a
-            // specific model term.
-            //
-            // Issue #4 round 2 went further and enumerated every other
-            // stream in the container (DocumentSummaryInformation,
-            // FileRec_Str, VendorAppMethod, CFR/CFRFileHeader, device/method
-            // tables, and a corpus-wide model-substring scan), plus probed
-            // the binary MSConfigInfo struct for a structured instrument
-            // type field. None panned out - see `raw::summary_info`'s
-            // module doc ("Round 2") for the full list and why each was
-            // ruled out. This is confirmed investigated-and-not-resolvable
-            // from the current file structure, not just unattempted.
-            instrument: CvTerm::new("MS:1000121", "SCIEX instrument model"),
-            // No serial number source either - same ruled-out CFBF streams
-            // as the instrument model above.
-            instrument_serial_number: None,
+            instrument,
+            instrument_serial_number,
             software_name: "opensxraw".to_string(),
             software_version: env!("CARGO_PKG_VERSION").to_string(),
             // No Analyst acquisition software version is wired up here: the
@@ -606,6 +635,7 @@ mod tests {
             idx_records,
             scan_file_size: 0,
             start_timestamp: None,
+            instrument_info: None,
             calibration: None,
             dde_records: Vec::new(),
         }
