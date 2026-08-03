@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use cfb::CompoundFile;
 use openmassspec_core::{
-    Analyzer, ChromatogramRecord, CvTerm, PrecursorInfo, RunMetadata, SpectrumRecord,
+    Analyzer, ChromatogramRecord, CvTerm, Polarity, PrecursorInfo, RunMetadata, SpectrumRecord,
     SpectrumSource,
 };
 
@@ -13,6 +13,7 @@ use crate::raw::calibration::Calibration;
 use crate::raw::dde::DdeRecord;
 use crate::raw::idx::IdxRecord;
 use crate::raw::instrument_log::{parse_instrument_info, resolve_cv_term, InstrumentInfo};
+use crate::raw::ion_source::{SourceParameter, ION_SPRAY_VOLTAGE_NAMES};
 use crate::raw::scan::{read_scan_block, ScanPoint};
 use crate::raw::summary_info::parse_create_timestamp;
 
@@ -55,6 +56,61 @@ fn dde_stream(sample: &str) -> String {
 /// round 3 investigation behind using this for the instrument model.
 fn log_stream(sample: &str) -> String {
     format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/Log")
+}
+
+/// How many `MethodN` subtrees to probe for an ion spray voltage parameter
+/// (issue #26). Bounded rather than enumerated via `list_samples`-style
+/// directory walk because `MethodSubtree` isn't nested per sample the way
+/// `SampleSubtree` is - see the caveat on `find_ion_spray_voltage`.
+const MAX_METHOD_PROBE: u32 = 4;
+
+/// How many `ParameterN` entries to probe within one `IonSourceParamsTable`.
+/// The corpus never showed more than 5 (`GS1`, `GS2`, `CUR`, `TEM`, `ISVF`/
+/// `IS`, plus occasionally `CAD`/`IHT`/`COLUMN TEM`); this leaves slack.
+const MAX_PARAMETER_PROBE: u32 = 8;
+
+/// Find the ion spray (electrospray needle) voltage for a `.wiff` file's
+/// active acquisition method, if present - see `raw::ion_source` for the
+/// full investigation behind using this as a polarity signal (issue #26).
+///
+/// Tries `MethodN`'s first device/period/experiment
+/// (`MethodSubtree/MethodN/DeviceMethod0/Period0/Experiment0/
+/// IonSourceParamsTable`) for `N` in `1..=MAX_METHOD_PROBE`, returning the
+/// value of the first `ISVF`/`IS`-named parameter found. Verified across the
+/// local corpus (200 files) that this value is identical across every
+/// `ExperimentN` within a method when a file has more than one (e.g.
+/// SWATH's per-cycle experiments), so reading only `Experiment0` is
+/// sufficient for the common case.
+///
+/// Caveat: `MethodSubtree` isn't nested per sample, so on a multi-sample
+/// `.wiff` file (Sigilweaver/OpenSXRaw#25) this reads whichever method the
+/// probe order happens to find first, not necessarily the one governing the
+/// specific sample `Reader::open_sample` was asked for. This is a
+/// per-file, not per-sample, approximation - same caveat already applies to
+/// `analyzer`'s family signal below.
+fn find_ion_spray_voltage(comp: &mut CompoundFile<std::fs::File>) -> Option<f32> {
+    for method_idx in 1..=MAX_METHOD_PROBE {
+        let base = format!(
+            "MethodSubtree/Method{method_idx}/DeviceMethod0/Period0/Experiment0/IonSourceParamsTable"
+        );
+        for param_idx in 0..MAX_PARAMETER_PROBE {
+            let path = format!("{base}/Parameter{param_idx}/ParameterData");
+            let mut stream = match comp.open_stream(&path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = Vec::new();
+            if stream.read_to_end(&mut buf).is_err() {
+                continue;
+            }
+            if let Some(param) = SourceParameter::from_bytes(&buf) {
+                if ION_SPRAY_VOLTAGE_NAMES.contains(&param.name.as_str()) {
+                    return Some(param.value);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Order sample subtree names so the common `SampleN` convention sorts
@@ -101,6 +157,10 @@ pub struct Reader {
     /// Decoded `DDERealTimeDataEx` records, in stream order. Empty on files
     /// without that stream (no DDA-style precursor triggering).
     dde_records: Vec<DdeRecord>,
+    /// Per-file polarity, derived from the acquisition method's ion spray
+    /// voltage sign - see `raw::ion_source` and `find_ion_spray_voltage`.
+    /// `None` when no `ISVF`/`IS` parameter was found (issue #26).
+    polarity: Option<Polarity>,
 }
 
 impl Reader {
@@ -249,7 +309,9 @@ impl Reader {
             });
 
         // Read TOF calibration constants, if present. Absent on QTRAP-only
-        // files - see `raw::calibration`.
+        // files - see `raw::calibration`. Whether this parses to `Some` is
+        // also used below as the TOF-vs-quad/trap analyzer family signal
+        // for issue #8 - see the comment on `analyzer` in `iter_spectra`.
         let calibration =
             comp.open_stream(calibration_stream(sample))
                 .ok()
@@ -271,6 +333,25 @@ impl Reader {
             })
             .unwrap_or_default();
 
+        // Read the ion spray voltage from the method's IonSourceParamsTable,
+        // if present, and derive polarity from its sign - see
+        // `raw::ion_source` and `find_ion_spray_voltage` for the full
+        // investigation (issue #26). A positive voltage means positive-mode
+        // acquisition, negative means negative-mode; this is standard ESI
+        // physics, not something read off vendor software. Every one of the
+        // 200 local corpus files has a positive value, so the `Negative`
+        // branch below is exercised only by synthetic tests, not a real
+        // fixture - see the module doc's caveat.
+        let polarity = find_ion_spray_voltage(&mut comp).and_then(|voltage| {
+            if voltage > 0.0 {
+                Some(Polarity::Positive)
+            } else if voltage < 0.0 {
+                Some(Polarity::Negative)
+            } else {
+                None
+            }
+        });
+
         let stem = wiff_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -285,6 +366,7 @@ impl Reader {
             instrument_info,
             calibration,
             dde_records,
+            polarity,
         })
     }
 }
@@ -376,6 +458,46 @@ impl SpectrumSource for Reader {
         let stem = self.stem.clone();
         let calibration = self.calibration;
         let dde_records = self.dde_records.clone();
+        let polarity = self.polarity;
+
+        // Analyzer family (issue #8, part 1): `calibration.is_some()` doubles
+        // as a TOF-vs-quad/trap discriminator, not just the m/z conversion
+        // flag it was added for. `TOFCalibrationData` only yields a real
+        // `Calibration` when its body carries an actual (slope, intercept)
+        // pair; on QTRAP-only files the stream exists but is header-only (32
+        // bytes, no body), so `Calibration::from_bytes` correctly returns
+        // `None` there - see `raw::calibration`'s module doc.
+        //
+        // Verified against the full local corpus (200 `.wiff` files,
+        // 2026-08-03): `calibration.is_some()` agrees, file-for-file, with
+        // two independent structural signals under
+        // `MethodSubtree/Method1/DeviceMethod0/Period0/ExperimentN/` -
+        // presence of an `ExperimentTOF` stream (173/200 files, always when
+        // calibration parses) and presence of an `ExperimentHeaderFJ` stream
+        // (27/200, always exactly the complementary set) - a three-way
+        // self-consistency check with zero disagreements. It also agrees
+        // with every free-text instrument-name hint found in
+        // `SummaryInformation`/`FileRec_Str` across the corpus: all 8
+        // calibration-absent files with a readable model hint say "QTRAP" or
+        // a QTRAP-family model number (5500, 6500), and every
+        // calibration-present file's hint says "TripleTOF" or "ZenoTOF"
+        // (including the "7600"/"ZENOTOF" ZenoTOF fixtures, confirming the
+        // signal covers both TOF sub-families, not just one model). No
+        // corpus file contradicted this. `MSConfigInfo`'s byte 0x20 (probed
+        // in `raw::summary_info`'s Round 2 investigation for exact model)
+        // was re-checked here at the coarser family level too and still
+        // does not separate cleanly - value 3 alone appears in both the
+        // calibration-present (81 files) and calibration-absent (8 files)
+        // buckets - so that field stays unused.
+        //
+        // `openmassspec_core::Analyzer` has no dedicated ion-trap/quad
+        // hybrid variant for QTRAP; `TQMS` (triple quadrupole) is the
+        // closest fit and is what the issue itself proposed.
+        let analyzer = if calibration.is_some() {
+            Analyzer::TOFMS
+        } else {
+            Analyzer::TQMS
+        };
 
         // Build an offset table for lookahead: next_offsets[i] is the byte
         // offset to use as the end bound when reading block i's payload.
@@ -473,47 +595,42 @@ impl SpectrumSource for Reader {
                         scan_number: (idx + 1) as u32,
                         native_id,
                         ms_level: rec.ms_level,
-                        // Investigated for issue #26 ("polarity hardcoded to
-                        // None for every spectrum") and still `None`: no
-                        // stream this reader currently decodes carries a
-                        // per-scan or per-run polarity signal.
+                        // Resolved for issue #26 ("polarity hardcoded to None
+                        // for every spectrum"). Earlier passes (see PR #29,
+                        // and `raw::idx`'s doc for issue #7's unrelated
+                        // finding that the Idx record's two "Unknown" bytes
+                        // are uniformly zero) ruled out every stream then
+                        // decoded by this reader - `SummaryInformation`,
+                        // `TOFCalibrationData`, `DDERealTimeDataEx`, `Idx`,
+                        // the `.wiff.scan` token stream - and correctly
+                        // flagged the per-Experiment `ExperimentHeader(Ex)`
+                        // method structures as the likely real location, but
+                        // had no corpus access to verify further.
                         //
-                        // - `raw::summary_info` (`SummaryInformation`/
-                        //   `DocumentSummaryInformation`): only the OLE
-                        //   creation timestamp and free-text author/company
-                        //   fields - no polarity property.
-                        // - `raw::calibration` (`TOFCalibrationData`): only
-                        //   the linear (slope, intercept) m/z pair.
-                        // - `raw::dde` (`DDERealTimeDataEx`): only a
-                        //   precursor m/z per DDA cycle.
-                        // - `raw::idx` (`Idx` record): the two "Unknown"
-                        //   bytes (0x08, 0x11) were checked by issue #7 while
-                        //   chasing a different bug and found uniformly zero
-                        //   across ~97k records of a multi-Experiment
-                        //   (SWATH/DDA) corpus fixture - not a varying
-                        //   per-scan flag of any kind, polarity included.
-                        // - `raw::scan` (`.wiff.scan` block payload): a pure
-                        //   m/z/intensity token stream, no header fields.
+                        // With corpus access, that structure was decoded
+                        // (see `raw::ion_source`): each Experiment's
+                        // `IonSourceParamsTable` carries named source
+                        // parameters, one of which is the ion spray voltage
+                        // (`ISVF` on TripleTOF/ZenoTOF, `IS` on QTRAP - see
+                        // `find_ion_spray_voltage` above). Its sign directly
+                        // determines polarity by standard electrospray
+                        // physics, not a SCIEX-specific fact. Every one of
+                        // the 200 local corpus files has a positive value
+                        // (verified physically sane against 8 other
+                        // parameter types decoding correctly from the same
+                        // byte layout), so this reader has never seen a
+                        // negative-mode fixture to confirm the `Negative`
+                        // branch against - that branch rests on ESI physics
+                        // and self-consistency (the field's own embedded
+                        // name), not a verified real file, per
+                        // `raw::ion_source`'s module doc.
                         //
-                        // On this instrument family, polarity is a method
-                        // setting recorded per-Experiment (SCIEX
-                        // `MethodSubtree/Method1/DeviceMethod0/PeriodN/
-                        // ExperimentN/ExperimentHeader(Ex)`), which this
-                        // reader does not decode at all yet - that binary
-                        // struct's layout is an open question, not something
-                        // ruled out. Populating this field would require
-                        // decoding that struct and correlating each scan back
-                        // to its owning Experiment, clean-room, against
-                        // corpus fixtures; per CONTRIBUTING's "don't guess"
-                        // policy, `None` (this reader's existing
-                        // "not resolved" convention, matching
-                        // `instrument_serial_number` and
-                        // `mobility_array_kind` elsewhere in this file) is
-                        // left in place rather than fabricating a decode.
-                        // `openmassspec_core::Polarity` has no `Unknown`
-                        // variant, so `Option::None` is the correct way to
-                        // represent "not determined" here.
-                        polarity: None,
+                        // `polarity` is read once per file/method (like
+                        // `analyzer` above), not per scan: verified across
+                        // multi-Experiment corpus fixtures (e.g. SWATH
+                        // cycles) that the value is identical across every
+                        // Experiment within one file.
+                        polarity,
                         // Left unset rather than asserting `Profile` for every
                         // scan (issue #27): that was wrong whenever the
                         // source acquisition is actually centroided, and none
@@ -549,7 +666,7 @@ impl SpectrumSource for Reader {
                         // in the mzML output - that requires the indicator
                         // above to be found first.
                         scan_mode: None,
-                        analyzer: Some(Analyzer::TOFMS),
+                        analyzer: Some(analyzer),
                         filter: None,
                         retention_time_sec: rec.retention_time_min as f64 * 60.0,
                         // Do NOT populate total_ion_current: the Idx TIC is in cps
@@ -638,6 +755,7 @@ mod tests {
             instrument_info: None,
             calibration: None,
             dde_records: Vec::new(),
+            polarity: None,
         }
     }
 
@@ -715,6 +833,52 @@ mod tests {
                 "scan_mode must be None, not an unverified guess"
             );
         }
+    }
+
+    #[test]
+    fn iter_spectra_uses_tofms_when_calibration_present() {
+        // Issue #8, part 1: a file whose TOFCalibrationData parsed
+        // successfully is TripleTOF/ZenoTOF-family.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.calibration = Some(Calibration {
+            slope: 0.001,
+            intercept: 0.5,
+        });
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].analyzer, Some(Analyzer::TOFMS));
+    }
+
+    #[test]
+    fn iter_spectra_uses_tqms_when_calibration_absent() {
+        // Issue #8, part 1: no TOFCalibrationData means QTRAP/quad family -
+        // TQMS (triple quadrupole) is the closest available Analyzer variant.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.calibration = None;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].analyzer, Some(Analyzer::TQMS));
+    }
+
+    #[test]
+    fn iter_spectra_carries_through_resolved_polarity() {
+        // Issue #26: polarity, once resolved by `find_ion_spray_voltage`, is
+        // applied uniformly to every spectrum in the file (a per-file/
+        // per-method signal, not per-scan - see the doc comment on
+        // `find_ion_spray_voltage`).
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.1, 2, 50.0)]);
+        reader.polarity = Some(Polarity::Positive);
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 2);
+        for spectrum in &spectra {
+            assert_eq!(spectrum.polarity, Some(Polarity::Positive));
+        }
+    }
+
+    #[test]
+    fn iter_spectra_leaves_polarity_none_when_unresolved() {
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.polarity = None;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].polarity, None);
     }
 
     fn point(raw_mz_bin: u32, raw_intensity: u32) -> ScanPoint {
@@ -920,5 +1084,73 @@ mod tests {
         let err = Reader::open(&wiff_path).err().unwrap();
         remove_synthetic_wiff(&wiff_path);
         assert!(err.to_string().contains(SAMPLE_SUBTREE_STORAGE));
+    }
+
+    /// Build a `ParameterData` stream matching the layout confirmed in
+    /// `raw::ion_source`: opaque preamble, `u16` name length at 0x22,
+    /// UTF-16LE name at 0x24, then an `f32` value immediately after.
+    fn parameter_data_bytes(name: &str, value: f32) -> Vec<u8> {
+        let mut data = vec![0u8; 0x22];
+        let name_utf16: Vec<u8> = name.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        data.extend_from_slice(&(name_utf16.len() as u16).to_le_bytes());
+        data.extend_from_slice(&name_utf16);
+        data.extend_from_slice(&value.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn open_resolves_polarity_end_to_end_from_ion_spray_voltage() {
+        // Issue #26: a full CFBF round trip - Reader::open must find the
+        // MethodSubtree/Method1/.../IonSourceParamsTable/ParameterN stream,
+        // recognize the "ISVF" parameter, and resolve `Positive` from its
+        // sign, all the way out to each spectrum's `polarity` field.
+        let mut wiff_path = std::env::temp_dir();
+        wiff_path.push(format!(
+            "opensxraw_test_{}_polarity_e2e.wiff",
+            std::process::id()
+        ));
+        let scan_path = format!("{}.scan", wiff_path.display());
+
+        let file = std::fs::File::create(&wiff_path).unwrap();
+        let mut comp = cfb::CompoundFile::create(file).unwrap();
+        comp.create_storage(SAMPLE_SUBTREE_STORAGE).unwrap();
+        comp.create_storage(format!("{SAMPLE_SUBTREE_STORAGE}/Sample1"))
+            .unwrap();
+        let mut idx_data = vec![0u8; IDX_STREAM_HEADER];
+        idx_data.extend(idx_record_bytes(1000));
+        comp.create_stream(idx_stream("Sample1"))
+            .unwrap()
+            .write_all(&idx_data)
+            .unwrap();
+
+        for storage in [
+            "MethodSubtree",
+            "MethodSubtree/Method1",
+            "MethodSubtree/Method1/DeviceMethod0",
+            "MethodSubtree/Method1/DeviceMethod0/Period0",
+            "MethodSubtree/Method1/DeviceMethod0/Period0/Experiment0",
+            "MethodSubtree/Method1/DeviceMethod0/Period0/Experiment0/IonSourceParamsTable",
+            "MethodSubtree/Method1/DeviceMethod0/Period0/Experiment0/IonSourceParamsTable/Parameter0",
+        ] {
+            comp.create_storage(storage).unwrap();
+        }
+        comp.create_stream(
+            "MethodSubtree/Method1/DeviceMethod0/Period0/Experiment0/IonSourceParamsTable/Parameter0/ParameterData",
+        )
+        .unwrap()
+        .write_all(&parameter_data_bytes("ISVF", 5500.0))
+        .unwrap();
+
+        comp.flush().unwrap();
+        drop(comp);
+        std::fs::write(&scan_path, b"placeholder").unwrap();
+
+        let mut reader = Reader::open(&wiff_path).unwrap();
+        std::fs::remove_file(&wiff_path).ok();
+        std::fs::remove_file(&scan_path).ok();
+
+        assert_eq!(reader.polarity, Some(Polarity::Positive));
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].polarity, Some(Polarity::Positive));
     }
 }
