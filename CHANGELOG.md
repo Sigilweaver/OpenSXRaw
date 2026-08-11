@@ -47,7 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is actually variable-cycle Top-N IDA/DDA, not fixed-window SWATH, which is
   why the position-mod-N heuristic failed there. No behavior change - not
   wired into the reader yet; see the doc's "Why this isn't wired in yet"
-  section. (Sigilweaver/OpenSXRaw#7, Sigilweaver/OpenSXRaw#23)
+  section. The activation-type investigation is also recorded explicitly:
+  no activation field has been identified, and the exact distinguishing
+  fixtures and per-scan linkage evidence needed before wiring it are listed.
+  (Sigilweaver/OpenSXRaw#7, Sigilweaver/OpenSXRaw#23)
 - `Reader::run_metadata` now resolves `instrument` to a specific PSI-MS CV
   term (e.g. `MS:1002533` "TripleTOF 6600") and populates
   `instrument_serial_number`, both parsed from the mass spectrometer's own
