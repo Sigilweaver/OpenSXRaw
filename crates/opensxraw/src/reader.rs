@@ -423,6 +423,7 @@ impl SpectrumSource for Reader {
         };
 
         RunMetadata {
+            extra: ::std::collections::BTreeMap::new(),
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
             native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
@@ -591,6 +592,8 @@ impl SpectrumSource for Reader {
                     };
 
                     SpectrumRecord {
+                        extra: ::std::collections::BTreeMap::new(),
+                        acquisition_event_id: None,
                         index: idx,
                         scan_number: (idx + 1) as u32,
                         native_id,
