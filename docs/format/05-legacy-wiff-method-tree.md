@@ -143,6 +143,24 @@ structures (the static per-transition `CE` field decode, and the rolling-CE
 table decode) from two different streams agreeing with each other, which is
 the strongest self-consistency evidence in this note.
 
+## Activation type remains unresolved
+
+No self-describing activation-method parameter was found alongside `CE` in
+either `MassRangeEx` shape described above. The decoded names in those tables
+identify voltages and timing parameters, but none identifies a dissociation
+method. The current conformance fixture also cannot settle the question: it
+contains no independently decoded per-scan or per-Experiment activation label
+against which an otherwise-unidentified method-tree field could be tested.
+
+Consequently, `PrecursorInfo.activation` must remain `None`; assigning CID or
+another activation enum from instrument family, acquisition type, or the mere
+presence of collision energy would be a guess. A verifiable implementation
+needs clean-room fixtures whose own method-tree contents distinguish at least
+two activation modes, plus a repeatable byte/token difference that follows
+that distinction across independent files. If the signal is per-Experiment,
+the per-scan Experiment linkage described below must also be resolved before
+it can be attached to a `SpectrumRecord`.
+
 **This directly explains the CE=0/CE=10 "default" values seen elsewhere**
 (see next section): a method using rolling/auto CE leaves the per-Experiment
 static `CE` field at a sentinel/UI-default value, because the real per-scan
@@ -337,3 +355,8 @@ not just suspicion.
   runtime - and the regression risk to `raw/dde.rs`'s existing MS1-cycle
   counting - is the actual remaining blocker to landing any of this as code,
   not further format archaeology.
+- No activation-type field has been identified. Wiring
+  `PrecursorInfo.activation` requires clean-room fixtures that differ in a
+  known activation setting and expose a matching method-tree signal; if that
+  signal is per-Experiment, it also depends on the same unresolved per-scan
+  Experiment linkage.
