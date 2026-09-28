@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 byteorder = "1.5.0"
-cfb = "0.14.0"
+cfb = "0.15.0"
 openmassspec-core = { workspace = true }
 thiserror = { workspace = true }
 
