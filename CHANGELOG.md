@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python spectra and run metadata now expose every shared record field.
+  Added bounded iteration, chromatograms, scan index data, sample selection,
+  instrument identity, calibration, ion source settings, and DDE precursors.
+  Namespaced extras preserve these decoded values in the shared records.
+
 ## [0.2.5] - 2026-08-12
 
 ### Changed

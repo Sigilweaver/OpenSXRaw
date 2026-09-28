@@ -67,6 +67,14 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --all-targets
 
+      - name: Python binding parity
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install 'maturin>=1.5,<2' pytest
+          VIRTUAL_ENV="$PWD/.venv" .venv/bin/maturin develop --release
+          OPENSXRAW_TEST_WIFF=corpus/PXD022088/Rcor2KOESC1.wiff .venv/bin/python -m pytest tests/test_bindings.py -v
+
   docs:
     name: Docs (Docusaurus)
     runs-on: ubuntu-latest

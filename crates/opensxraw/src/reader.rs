@@ -61,7 +61,7 @@ fn log_stream(sample: &str) -> String {
 /// How many `MethodN` subtrees to probe for an ion spray voltage parameter
 /// (issue #26). Bounded rather than enumerated via `list_samples`-style
 /// directory walk because `MethodSubtree` isn't nested per sample the way
-/// `SampleSubtree` is - see the caveat on `find_ion_spray_voltage`.
+/// `SampleSubtree` is - see the caveat on `find_ion_source_parameters`.
 const MAX_METHOD_PROBE: u32 = 4;
 
 /// How many `ParameterN` entries to probe within one `IonSourceParamsTable`.
@@ -69,14 +69,14 @@ const MAX_METHOD_PROBE: u32 = 4;
 /// `IS`, plus occasionally `CAD`/`IHT`/`COLUMN TEM`); this leaves slack.
 const MAX_PARAMETER_PROBE: u32 = 8;
 
-/// Find the ion spray (electrospray needle) voltage for a `.wiff` file's
-/// active acquisition method, if present - see `raw::ion_source` for the
-/// full investigation behind using this as a polarity signal (issue #26).
+/// Find the named ion source parameters for a `.wiff` file's active
+/// acquisition method, if present - see `raw::ion_source` for the
+/// investigation behind the voltage-based polarity signal (issue #26).
 ///
 /// Tries `MethodN`'s first device/period/experiment
 /// (`MethodSubtree/MethodN/DeviceMethod0/Period0/Experiment0/
 /// IonSourceParamsTable`) for `N` in `1..=MAX_METHOD_PROBE`, returning the
-/// value of the first `ISVF`/`IS`-named parameter found. Verified across the
+/// parameter set containing an `ISVF`/`IS` name. Verified across the
 /// local corpus (200 files) that this value is identical across every
 /// `ExperimentN` within a method when a file has more than one (e.g.
 /// SWATH's per-cycle experiments), so reading only `Experiment0` is
@@ -88,11 +88,13 @@ const MAX_PARAMETER_PROBE: u32 = 8;
 /// specific sample `Reader::open_sample` was asked for. This is a
 /// per-file, not per-sample, approximation - same caveat already applies to
 /// `analyzer`'s family signal below.
-fn find_ion_spray_voltage(comp: &mut CompoundFile<std::fs::File>) -> Option<f32> {
+fn find_ion_source_parameters(comp: &mut CompoundFile<std::fs::File>) -> Vec<SourceParameter> {
+    let mut first = Vec::new();
     for method_idx in 1..=MAX_METHOD_PROBE {
         let base = format!(
             "MethodSubtree/Method{method_idx}/DeviceMethod0/Period0/Experiment0/IonSourceParamsTable"
         );
+        let mut parameters = Vec::new();
         for param_idx in 0..MAX_PARAMETER_PROBE {
             let path = format!("{base}/Parameter{param_idx}/ParameterData");
             let mut stream = match comp.open_stream(&path) {
@@ -104,13 +106,20 @@ fn find_ion_spray_voltage(comp: &mut CompoundFile<std::fs::File>) -> Option<f32>
                 continue;
             }
             if let Some(param) = SourceParameter::from_bytes(&buf) {
-                if ION_SPRAY_VOLTAGE_NAMES.contains(&param.name.as_str()) {
-                    return Some(param.value);
-                }
+                parameters.push(param);
             }
         }
+        if parameters
+            .iter()
+            .any(|p| ION_SPRAY_VOLTAGE_NAMES.contains(&p.name.as_str()))
+        {
+            return parameters;
+        }
+        if first.is_empty() {
+            first = parameters;
+        }
     }
-    None
+    first
 }
 
 /// Order sample subtree names so the common `SampleN` convention sorts
@@ -134,6 +143,8 @@ fn sort_sample_names(names: &mut [String]) {
 pub struct Reader {
     /// Stem name of the file (e.g. "Rcor2KOESC1") used in native IDs.
     pub stem: String,
+    /// Selected WIFF sample subtree.
+    pub sample: String,
     /// Path to the `.wiff.scan` file.
     scan_path: PathBuf,
     /// Decoded index records, in order.
@@ -148,19 +159,21 @@ pub struct Reader {
     /// device status entries. `None` when that stream is absent, or present
     /// but doesn't contain a recognizable identification record - see
     /// `raw::instrument_log`.
-    instrument_info: Option<InstrumentInfo>,
+    pub instrument_info: Option<InstrumentInfo>,
     /// Linear m/z calibration constants read from `TOFCalibrationData`.
     /// `None` on files without that stream (e.g. QTRAP-only acquisitions),
     /// in which case `mz` arrays stay as raw uncalibrated bin values - see
     /// `raw::calibration`.
-    calibration: Option<Calibration>,
+    pub calibration: Option<Calibration>,
     /// Decoded `DDERealTimeDataEx` records, in stream order. Empty on files
     /// without that stream (no DDA-style precursor triggering).
-    dde_records: Vec<DdeRecord>,
+    pub dde_records: Vec<DdeRecord>,
+    /// Named ion source settings from the selected method.
+    pub ion_source_parameters: Vec<SourceParameter>,
     /// Per-file polarity, derived from the acquisition method's ion spray
-    /// voltage sign - see `raw::ion_source` and `find_ion_spray_voltage`.
+    /// voltage sign - see `raw::ion_source` and `find_ion_source_parameters`.
     /// `None` when no `ISVF`/`IS` parameter was found (issue #26).
-    polarity: Option<Polarity>,
+    pub polarity: Option<Polarity>,
 }
 
 impl Reader {
@@ -335,22 +348,27 @@ impl Reader {
 
         // Read the ion spray voltage from the method's IonSourceParamsTable,
         // if present, and derive polarity from its sign - see
-        // `raw::ion_source` and `find_ion_spray_voltage` for the full
+        // `raw::ion_source` and `find_ion_source_parameters` for the full
         // investigation (issue #26). A positive voltage means positive-mode
         // acquisition, negative means negative-mode; this is standard ESI
         // physics, not something read off vendor software. Every one of the
         // 200 local corpus files has a positive value, so the `Negative`
         // branch below is exercised only by synthetic tests, not a real
         // fixture - see the module doc's caveat.
-        let polarity = find_ion_spray_voltage(&mut comp).and_then(|voltage| {
-            if voltage > 0.0 {
-                Some(Polarity::Positive)
-            } else if voltage < 0.0 {
-                Some(Polarity::Negative)
-            } else {
-                None
-            }
-        });
+        let ion_source_parameters = find_ion_source_parameters(&mut comp);
+        let polarity = ion_source_parameters
+            .iter()
+            .find(|p| ION_SPRAY_VOLTAGE_NAMES.contains(&p.name.as_str()))
+            .map(|p| p.value)
+            .and_then(|voltage| {
+                if voltage > 0.0 {
+                    Some(Polarity::Positive)
+                } else if voltage < 0.0 {
+                    Some(Polarity::Negative)
+                } else {
+                    None
+                }
+            });
 
         let stem = wiff_path
             .file_stem()
@@ -359,6 +377,7 @@ impl Reader {
 
         Ok(Reader {
             stem,
+            sample: sample.to_string(),
             scan_path,
             idx_records,
             scan_file_size,
@@ -366,6 +385,7 @@ impl Reader {
             instrument_info,
             calibration,
             dde_records,
+            ion_source_parameters,
             polarity,
         })
     }
@@ -422,8 +442,42 @@ impl SpectrumSource for Reader {
             None => (CvTerm::new("MS:1000121", "SCIEX instrument model"), None),
         };
 
+        let mut extra = ::std::collections::BTreeMap::new();
+        extra.insert("opensxraw.sample".to_string(), self.sample.clone());
+        extra.insert(
+            "opensxraw.dde_record_count".to_string(),
+            self.dde_records.len().to_string(),
+        );
+        if let Some(info) = &self.instrument_info {
+            extra.insert(
+                "opensxraw.component_id".to_string(),
+                info.component_id.clone(),
+            );
+            if let Some(value) = &info.manufacturer {
+                extra.insert("opensxraw.manufacturer".to_string(), value.clone());
+            }
+            if let Some(value) = &info.model_number {
+                extra.insert("opensxraw.model_number".to_string(), value.clone());
+            }
+        }
+        if let Some(cal) = self.calibration {
+            extra.insert(
+                "opensxraw.calibration_slope".to_string(),
+                cal.slope.to_string(),
+            );
+            extra.insert(
+                "opensxraw.calibration_intercept".to_string(),
+                cal.intercept.to_string(),
+            );
+        }
+        for param in &self.ion_source_parameters {
+            extra.insert(
+                format!("opensxraw.ion_source.{}", param.name),
+                param.value.to_string(),
+            );
+        }
         RunMetadata {
-            extra: ::std::collections::BTreeMap::new(),
+            extra,
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
             native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
@@ -591,8 +645,15 @@ impl SpectrumSource for Reader {
                         points_to_arrays(points, calibration)
                     };
 
+                    let mut extra = ::std::collections::BTreeMap::new();
+                    extra.insert("opensxraw.idx_tic_cps".to_string(), rec.tic.to_string());
+                    extra.insert(
+                        "opensxraw.scan_offset".to_string(),
+                        rec.scan_offset.to_string(),
+                    );
+                    extra.insert("opensxraw.scan_size".to_string(), rec.scan_size.to_string());
                     SpectrumRecord {
-                        extra: ::std::collections::BTreeMap::new(),
+                        extra,
                         acquisition_event_id: None,
                         index: idx,
                         scan_number: (idx + 1) as u32,
@@ -615,7 +676,7 @@ impl SpectrumSource for Reader {
                         // `IonSourceParamsTable` carries named source
                         // parameters, one of which is the ion spray voltage
                         // (`ISVF` on TripleTOF/ZenoTOF, `IS` on QTRAP - see
-                        // `find_ion_spray_voltage` above). Its sign directly
+                        // `find_ion_source_parameters` above). Its sign directly
                         // determines polarity by standard electrospray
                         // physics, not a SCIEX-specific fact. Every one of
                         // the 200 local corpus files has a positive value
@@ -751,6 +812,7 @@ mod tests {
     fn reader_with_idx(idx_records: Vec<IdxRecord>) -> Reader {
         Reader {
             stem: "synthetic".to_string(),
+            sample: "Sample1".to_string(),
             scan_path: PathBuf::from("synthetic.wiff.scan"),
             idx_records,
             scan_file_size: 0,
@@ -758,6 +820,7 @@ mod tests {
             instrument_info: None,
             calibration: None,
             dde_records: Vec::new(),
+            ion_source_parameters: Vec::new(),
             polarity: None,
         }
     }
@@ -863,10 +926,10 @@ mod tests {
 
     #[test]
     fn iter_spectra_carries_through_resolved_polarity() {
-        // Issue #26: polarity, once resolved by `find_ion_spray_voltage`, is
+        // Issue #26: polarity, once resolved by `find_ion_source_parameters`, is
         // applied uniformly to every spectrum in the file (a per-file/
         // per-method signal, not per-scan - see the doc comment on
-        // `find_ion_spray_voltage`).
+        // `find_ion_source_parameters`).
         let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.1, 2, 50.0)]);
         reader.polarity = Some(Polarity::Positive);
         let spectra: Vec<_> = reader.iter_spectra().collect();
