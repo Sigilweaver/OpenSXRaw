@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turned into empty spectra: each is logged (`log` crate, `warn`),
   recorded under `opensxraw.scan_read_error` in the spectrum's `extra`,
   and counted by the new `Reader::scan_read_failures()`.
+- A scan block that starts past the end of the `.wiff.scan` file is
+  reported the same way instead of yielding a silently empty spectrum.
+- Read errors on optional `.wiff` streams (`SummaryInformation`, `Log`,
+  `TOFCalibrationData`, `DDERealTimeDataEx`, ion source parameters) are
+  logged at `warn` instead of ignored; a `DDERealTimeDataEx` read error no
+  longer parses a partial buffer.
 - Guide pages no longer claim m/z is uncalibrated, precursors are not
   decoded, or every spectrum is TOFMS.
 

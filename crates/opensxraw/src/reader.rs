@@ -71,6 +71,27 @@ const MAX_METHOD_PROBE: u32 = 4;
 /// `IS`, plus occasionally `CAD`/`IHT`/`COLUMN TEM`); this leaves slack.
 const MAX_PARAMETER_PROBE: u32 = 8;
 
+/// Read an optional CFBF stream. A missing stream is a normal condition and
+/// returns `None` quietly; any other open or read error is logged at `warn`
+/// level before returning `None`, so optional metadata never fails `open`
+/// but is never dropped silently either.
+fn read_optional_stream(comp: &mut CompoundFile<std::fs::File>, path: &str) -> Option<Vec<u8>> {
+    let mut stream = match comp.open_stream(path) {
+        Ok(stream) => stream,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            log::warn!("opensxraw: cannot open stream {path}: {e}");
+            return None;
+        }
+    };
+    let mut buf = Vec::new();
+    if let Err(e) = stream.read_to_end(&mut buf) {
+        log::warn!("opensxraw: failed to read stream {path}: {e}");
+        return None;
+    }
+    Some(buf)
+}
+
 /// Find the named ion source parameters for a `.wiff` file's active
 /// acquisition method, if present - see `raw::ion_source` for the
 /// investigation behind the voltage-based polarity signal (issue #26).
@@ -99,14 +120,9 @@ fn find_ion_source_parameters(comp: &mut CompoundFile<std::fs::File>) -> Vec<Sou
         let mut parameters = Vec::new();
         for param_idx in 0..MAX_PARAMETER_PROBE {
             let path = format!("{base}/Parameter{param_idx}/ParameterData");
-            let mut stream = match comp.open_stream(&path) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let mut buf = Vec::new();
-            if stream.read_to_end(&mut buf).is_err() {
+            let Some(buf) = read_optional_stream(comp, &path) else {
                 continue;
-            }
+            };
             if let Some(param) = SourceParameter::from_bytes(&buf) {
                 parameters.push(param);
             }
@@ -140,6 +156,10 @@ fn sort_sample_names(names: &mut [String]) {
         }
     });
 }
+
+/// Size of the per-block header that precedes each scan payload in the
+/// `.wiff.scan` file (see `raw::scan`).
+const SCAN_HEADER_LEN: u64 = 56;
 
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
@@ -176,8 +196,8 @@ pub struct Reader {
     /// voltage sign - see `raw::ion_source` and `find_ion_source_parameters`.
     /// `None` when no `ISVF`/`IS` parameter was found (issue #26).
     pub polarity: Option<Polarity>,
-    /// Number of scan blocks whose `.wiff.scan` read failed with an I/O
-    /// error during `iter_spectra`. Such spectra are still yielded (with
+    /// Number of scan blocks whose `.wiff.scan` read failed (an I/O error, or
+    /// a block that starts past the end of the file) during `iter_spectra`. Such spectra are still yielded (with
     /// empty arrays and an `opensxraw.scan_read_error` extra entry) so the
     /// iterator shape is unchanged; see `Reader::scan_read_failures`.
     scan_read_failures: Arc<AtomicUsize>,
@@ -307,50 +327,26 @@ impl Reader {
         // metadata: not every `.wiff` file carries this stream (see
         // `raw::summary_info`'s corpus survey), so any failure here just
         // leaves `start_timestamp` as `None` rather than failing `open`.
-        let start_timestamp = comp
-            .open_stream(SUMMARY_INFO_STREAM)
-            .ok()
-            .and_then(|mut stream| {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).ok()?;
-                parse_create_timestamp(&buf)
-            });
+        let start_timestamp = read_optional_stream(&mut comp, SUMMARY_INFO_STREAM)
+            .and_then(|buf| parse_create_timestamp(&buf));
 
         // Read the mass spectrometer's self-identification record from the
         // Log stream, if present and recognizable. Optional metadata, same
         // as `start_timestamp` above - see `raw::instrument_log`.
-        let instrument_info = comp
-            .open_stream(log_stream(sample))
-            .ok()
-            .and_then(|mut stream| {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).ok()?;
-                parse_instrument_info(&buf)
-            });
+        let instrument_info = read_optional_stream(&mut comp, &log_stream(sample))
+            .and_then(|buf| parse_instrument_info(&buf));
 
         // Read TOF calibration constants, if present. Absent on QTRAP-only
         // files - see `raw::calibration`. Whether this parses to `Some` is
         // also used below as the TOF-vs-quad/trap analyzer family signal
         // for issue #8 - see the comment on `analyzer` in `iter_spectra`.
-        let calibration =
-            comp.open_stream(calibration_stream(sample))
-                .ok()
-                .and_then(|mut stream| {
-                    let mut buf = Vec::new();
-                    stream.read_to_end(&mut buf).ok()?;
-                    Calibration::from_bytes(&buf)
-                });
+        let calibration = read_optional_stream(&mut comp, &calibration_stream(sample))
+            .and_then(|buf| Calibration::from_bytes(&buf));
 
         // Read DDA precursor-selection records, if present. Absent on files
         // without IDA/DDA-style precursor triggering - see `raw::dde`.
-        let dde_records = comp
-            .open_stream(dde_stream(sample))
-            .ok()
-            .map(|mut stream| {
-                let mut buf = Vec::new();
-                let _ = stream.read_to_end(&mut buf);
-                DdeRecord::parse_stream(&buf)
-            })
+        let dde_records = read_optional_stream(&mut comp, &dde_stream(sample))
+            .map(|buf| DdeRecord::parse_stream(&buf))
             .unwrap_or_default();
 
         // Read the ion spray voltage from the method's IonSourceParamsTable,
@@ -399,7 +395,7 @@ impl Reader {
     }
 
     /// Number of scan blocks that failed to read from the `.wiff.scan` file
-    /// (I/O errors) across all `iter_spectra` calls on this reader. Each
+    /// (I/O errors, or blocks that start past the end of the file) across all `iter_spectra` calls on this reader. Each
     /// failure is also logged at `warn` level and recorded on the affected
     /// spectrum as the `opensxraw.scan_read_error` extra entry; the spectrum
     /// itself is yielded with empty m/z and intensity arrays.
@@ -656,17 +652,30 @@ impl SpectrumSource for Reader {
                         None
                     };
 
-                    // Decode the scan payload. An I/O failure is not silently
+                    // Decode the scan payload. A read failure is not silently
                     // turned into an empty spectrum: it is logged, counted on
                     // the reader, and recorded in the spectrum's `extra` map.
+                    // `read_scan_block` returns an empty block (not an error)
+                    // when the block's payload starts at or past the end of
+                    // the `.wiff.scan` file, so that case is checked here.
                     let mut extra = ::std::collections::BTreeMap::new();
-                    let points = match read_scan_block(
-                        &scan_path,
-                        rec.scan_offset as u64,
-                        rec.scan_size as u64,
-                        next_offset,
-                        scan_file_size,
-                    ) {
+                    let payload_start = (rec.scan_offset as u64).saturating_add(SCAN_HEADER_LEN);
+                    let read = if payload_start >= scan_file_size {
+                        Err(format!(
+                            "scan block payload at offset {payload_start} is past the end \
+                             of the .wiff.scan file ({scan_file_size} bytes)"
+                        ))
+                    } else {
+                        read_scan_block(
+                            &scan_path,
+                            rec.scan_offset as u64,
+                            rec.scan_size as u64,
+                            next_offset,
+                            scan_file_size,
+                        )
+                        .map_err(|e| e.to_string())
+                    };
+                    let points = match read {
                         Ok(points) => points,
                         Err(e) => {
                             scan_read_failures.fetch_add(1, Ordering::Relaxed);
@@ -675,7 +684,7 @@ impl SpectrumSource for Reader {
                                  (offset {}): {e}",
                                 rec.scan_offset
                             );
-                            extra.insert("opensxraw.scan_read_error".to_string(), e.to_string());
+                            extra.insert("opensxraw.scan_read_error".to_string(), e);
                             Vec::new()
                         }
                     };
@@ -971,6 +980,18 @@ mod tests {
         assert_eq!(spectra.len(), 1);
         assert!(spectra[0].mz.is_empty());
         assert!(spectra[0].extra.contains_key("opensxraw.scan_read_error"));
+        assert_eq!(reader.scan_read_failures(), 1);
+    }
+
+    #[test]
+    fn iter_spectra_flags_scan_block_past_end_of_file() {
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.idx_records[0].scan_offset = 5_000;
+        reader.scan_file_size = 100;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 1);
+        assert!(spectra[0].mz.is_empty());
+        assert!(spectra[0].extra["opensxraw.scan_read_error"].contains("past the end"));
         assert_eq!(reader.scan_read_failures(), 1);
     }
 

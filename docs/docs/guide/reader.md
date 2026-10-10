@@ -67,7 +67,8 @@ position in the `Idx` stream.
   centroid/profile indicator; a prior version of the reader hardcoded
   `Profile` here, which mislabeled centroided acquisitions.
 
-If a scan block cannot be read from the `.wiff.scan` file (an I/O error),
+If a scan block cannot be read from the `.wiff.scan` file (an I/O error,
+or a block that starts past the end of the file),
 the spectrum is still yielded with empty arrays, a warning is logged via
 the `log` crate, the error text is stored under the
 `opensxraw.scan_read_error` key in `extra`, and
