@@ -9,10 +9,22 @@ import opensxraw
 import pytest
 
 
+FIXTURE = "PXD022088/Rcor2KOESC1.wiff"
+
+
+def _fixture_path() -> Path:
+    if "OPENSXRAW_TEST_WIFF" in os.environ:
+        return Path(os.environ["OPENSXRAW_TEST_WIFF"])
+    root = os.environ.get("OPENSXRAW_CORPUS", "corpus")
+    return Path(root) / FIXTURE
+
+
 def test_decoded_fields():
-    path = Path(os.environ.get("OPENSXRAW_TEST_WIFF", "corpus/PXD022088/Rcor2KOESC1.wiff"))
+    path = _fixture_path()
     if not path.is_file():
-        pytest.skip("set OPENSXRAW_TEST_WIFF to a WIFF file")
+        if os.environ.get("REQUIRE_CORPUS") == "1":
+            pytest.fail(f"REQUIRE_CORPUS=1 but {path} is missing")
+        pytest.skip("set OPENSXRAW_CORPUS or OPENSXRAW_TEST_WIFF to a WIFF fixture")
     samples = opensxraw.list_samples(str(path))
     assert samples
     reader = opensxraw.open_sample(str(path), samples[0])
@@ -28,6 +40,10 @@ def test_decoded_fields():
     first = reader.read_spectrum(0)
     streamed = next(opensxraw.iter_spectra(str(path), sample=samples[0]))
     assert first.native_id == streamed.native_id
+    assert first.native_id == "scan=1"
+    assert run["native_id_format"]["accession"] == "MS:1000776"
     assert len(first.mz) == len(first.intensity)
+    with pytest.raises(IndexError):
+        reader.read_spectrum(reader.scan_count)
     for chrom in reader.read_chromatograms():
         assert len(chrom["time_sec"]) == len(chrom["intensity"])

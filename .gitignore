@@ -1,9 +1,11 @@
 # Sandbox
 re/
 
-# Rust build artifacts
+# Rust build artifacts (Cargo.lock is committed: the workspace ships wheels)
 /target/
-**/Cargo.lock
+
+# Python
+__pycache__/
 
 # Corpus fixtures pulled on demand (e.g. by CI, see .github/workflows/ci.yml)
 # for conformance testing - not redistributed through this repo.

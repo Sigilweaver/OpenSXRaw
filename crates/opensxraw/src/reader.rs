@@ -2,6 +2,8 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use cfb::CompoundFile;
 use openmassspec_core::{
@@ -141,7 +143,7 @@ fn sort_sample_names(names: &mut [String]) {
 
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
-    /// Stem name of the file (e.g. "Rcor2KOESC1") used in native IDs.
+    /// Stem name of the file (e.g. "Rcor2KOESC1").
     pub stem: String,
     /// Selected WIFF sample subtree.
     pub sample: String,
@@ -174,6 +176,11 @@ pub struct Reader {
     /// voltage sign - see `raw::ion_source` and `find_ion_source_parameters`.
     /// `None` when no `ISVF`/`IS` parameter was found (issue #26).
     pub polarity: Option<Polarity>,
+    /// Number of scan blocks whose `.wiff.scan` read failed with an I/O
+    /// error during `iter_spectra`. Such spectra are still yielded (with
+    /// empty arrays and an `opensxraw.scan_read_error` extra entry) so the
+    /// iterator shape is unchanged; see `Reader::scan_read_failures`.
+    scan_read_failures: Arc<AtomicUsize>,
 }
 
 impl Reader {
@@ -387,7 +394,17 @@ impl Reader {
             dde_records,
             ion_source_parameters,
             polarity,
+            scan_read_failures: Arc::new(AtomicUsize::new(0)),
         })
+    }
+
+    /// Number of scan blocks that failed to read from the `.wiff.scan` file
+    /// (I/O errors) across all `iter_spectra` calls on this reader. Each
+    /// failure is also logged at `warn` level and recorded on the affected
+    /// spectrum as the `opensxraw.scan_read_error` extra entry; the spectrum
+    /// itself is yielded with empty m/z and intensity arrays.
+    pub fn scan_read_failures(&self) -> usize {
+        self.scan_read_failures.load(Ordering::Relaxed)
     }
 }
 
@@ -480,7 +497,12 @@ impl SpectrumSource for Reader {
             extra,
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
-            native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
+            // Native IDs are emitted as `scan=N` (1-based Idx order), which is
+            // exactly the PSI-MS "scan number only nativeID format". The WIFF
+            // nativeID format (MS:1000770, `sample= period= cycle=
+            // experiment=`) is not claimed because those fields are not
+            // decoded per scan.
+            native_id_format: CvTerm::new("MS:1000776", "scan number only nativeID format"),
             instrument,
             instrument_serial_number,
             software_name: "opensxraw".to_string(),
@@ -510,10 +532,11 @@ impl SpectrumSource for Reader {
         let records = self.idx_records.clone();
         let scan_path = self.scan_path.clone();
         let scan_file_size = self.scan_file_size;
-        let stem = self.stem.clone();
         let calibration = self.calibration;
         let dde_records = self.dde_records.clone();
         let polarity = self.polarity;
+        let stem = self.stem.clone();
+        let scan_read_failures = Arc::clone(&self.scan_read_failures);
 
         // Analyzer family (issue #8, part 1): `calibration.is_some()` doubles
         // as a TOF-vs-quad/trap discriminator, not just the m/z conversion
@@ -586,7 +609,7 @@ impl SpectrumSource for Reader {
                 last_ids.push(cur_last_id.clone());
                 counts.push(cur_count);
                 if rec.ms_level == 1 {
-                    cur_last_id = Some(format!("file={} scan={}", stem, i + 1));
+                    cur_last_id = Some(format!("scan={}", i + 1));
                     cur_count += 1;
                 }
             }
@@ -601,7 +624,7 @@ impl SpectrumSource for Reader {
             .enumerate()
             .map(
                 move |(idx, (((rec, next_offset), last_ms1_id), ms1_count))| {
-                    let native_id = format!("file={} scan={}", stem, idx + 1);
+                    let native_id = format!("scan={}", idx + 1);
 
                     // Precursor info for MS2 spectra. `precursor_native_id`
                     // references the preceding MS1 survey scan actually seen in
@@ -613,8 +636,9 @@ impl SpectrumSource for Reader {
                     // scan before any MS1 has been seen at all (no survey scan
                     // to reference yet); fall back to an explicit "unknown"
                     // placeholder id only in that edge case, so the record still
-                    // carries the required precursor info without fabricating a
-                    // scan reference.
+                    // carries the precursor info the shared conformance suite
+                    // requires without fabricating a scan reference. Note the
+                    // placeholder is not itself a `scan=N` native ID.
                     let precursor = if rec.ms_level >= 2 {
                         let precursor_mz = ms1_count
                             .checked_sub(1)
@@ -632,20 +656,31 @@ impl SpectrumSource for Reader {
                         None
                     };
 
-                    // Decode the scan payload.
-                    let (mz, intensity) = {
-                        let points = read_scan_block(
-                            &scan_path,
-                            rec.scan_offset as u64,
-                            rec.scan_size as u64,
-                            next_offset,
-                            scan_file_size,
-                        )
-                        .unwrap_or_default();
-                        points_to_arrays(points, calibration)
-                    };
-
+                    // Decode the scan payload. An I/O failure is not silently
+                    // turned into an empty spectrum: it is logged, counted on
+                    // the reader, and recorded in the spectrum's `extra` map.
                     let mut extra = ::std::collections::BTreeMap::new();
+                    let points = match read_scan_block(
+                        &scan_path,
+                        rec.scan_offset as u64,
+                        rec.scan_size as u64,
+                        next_offset,
+                        scan_file_size,
+                    ) {
+                        Ok(points) => points,
+                        Err(e) => {
+                            scan_read_failures.fetch_add(1, Ordering::Relaxed);
+                            log::warn!(
+                                "opensxraw: failed to read scan block for {native_id} \
+                                 (offset {}): {e}",
+                                rec.scan_offset
+                            );
+                            extra.insert("opensxraw.scan_read_error".to_string(), e.to_string());
+                            Vec::new()
+                        }
+                    };
+                    let (mz, intensity) = points_to_arrays(points, calibration);
+
                     extra.insert("opensxraw.idx_tic_cps".to_string(), rec.tic.to_string());
                     extra.insert(
                         "opensxraw.scan_offset".to_string(),
@@ -822,6 +857,7 @@ mod tests {
             dde_records: Vec::new(),
             ion_source_parameters: Vec::new(),
             polarity: None,
+            scan_read_failures: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -922,6 +958,40 @@ mod tests {
         reader.calibration = None;
         let spectra: Vec<_> = reader.iter_spectra().collect();
         assert_eq!(spectra[0].analyzer, Some(Analyzer::TQMS));
+    }
+
+    #[test]
+    fn iter_spectra_counts_and_records_scan_read_failures() {
+        // A `.wiff.scan` that cannot be opened must not silently become an
+        // empty spectrum: the failure is counted and recorded in `extra`.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.scan_path = PathBuf::from("/nonexistent/opensxraw/missing.wiff.scan");
+        reader.scan_file_size = 10_000;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 1);
+        assert!(spectra[0].mz.is_empty());
+        assert!(spectra[0].extra.contains_key("opensxraw.scan_read_error"));
+        assert_eq!(reader.scan_read_failures(), 1);
+    }
+
+    #[test]
+    fn native_ids_match_declared_scan_number_only_format() {
+        let mut reader =
+            reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.5, 2, 250.0)]);
+        assert_eq!(
+            reader.run_metadata().native_id_format.accession,
+            "MS:1000776"
+        );
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].native_id, "scan=1");
+        assert_eq!(spectra[1].native_id, "scan=2");
+        assert_eq!(
+            spectra[1]
+                .precursor
+                .as_ref()
+                .and_then(|p| p.precursor_native_id.as_deref()),
+            Some("scan=1")
+        );
     }
 
     #[test]

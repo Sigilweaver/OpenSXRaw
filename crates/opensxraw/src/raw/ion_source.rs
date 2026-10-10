@@ -81,13 +81,15 @@ impl SourceParameter {
         let name_len = LittleEndian::read_u16(&data[NAME_LEN_OFFSET..NAME_LEN_OFFSET + 2]) as usize;
         let name_end = NAME_OFFSET.checked_add(name_len)?;
         let value_end = name_end.checked_add(4)?;
-        if data.len() < value_end || name_len % 2 != 0 {
+        if data.len() < value_end || !name_len.is_multiple_of(2) {
             return None;
         }
 
         let name_units: Vec<u16> = data[NAME_OFFSET..name_end]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
             .collect();
         let name = String::from_utf16(&name_units).ok()?;
 

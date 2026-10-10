@@ -16,9 +16,8 @@
 //!
 //! In practice, reading a block means:
 //!   1. Seek to `scan_offset + 56` for the payload start.
-//!   2. Scan forward for `ff ff ff ff` (which will fall somewhere inside the
-//!      next block's window region) to find where to stop.
-//!   3. Decode the token stream in between.
+//!   2. Decode tokens until a `ff ff ff ff` terminator is seen at a token
+//!      boundary (it falls somewhere inside the next block's window region).
 //!
 //! # Token encoding
 //!
@@ -39,8 +38,8 @@
 //!   emits point.
 //!
 //! The m/z accumulator starts at 0. The raw accumulated value is an integer
-//! time-bin index; conversion to physical m/z (Da) requires calibration
-//! constants from the method streams, which are not yet decoded.
+//! time-bin index; the reader converts it to m/z (Da) using the
+//! `TOFCalibrationData` constants when present (see `raw::calibration`).
 //!
 //! # Terminator
 //!
@@ -175,7 +174,8 @@ const MAX_BLOCK_READ_LEN: u64 = 64 * 1024 * 1024; // 64 MiB
 /// `file_size` for the last scan. It is used to bound the terminator search.
 /// `scan_file_size` is the actual on-disk size of `scan_path`.
 ///
-/// Returns the decoded scan points, or an empty vec if the block cannot be read.
+/// Returns the decoded scan points, an empty vec if the block lies outside
+/// the file, or an error if the file cannot be opened or read.
 pub fn read_scan_block(
     scan_path: &std::path::Path,
     scan_offset: u64,
@@ -210,28 +210,20 @@ pub fn read_scan_block(
     }
     let read_len = (read_end - payload_start) as usize;
 
-    let mut f = std::fs::File::open(scan_path)?;
+    let f = std::fs::File::open(scan_path)?;
+    let mut f = std::io::BufReader::new(f);
     f.seek(SeekFrom::Start(payload_start))?;
-    let mut buf = vec![0u8; read_len];
-    let n = f.read(&mut buf)?;
-    buf.truncate(n);
+    // A single `read()` may legally return fewer bytes than requested, which
+    // would silently truncate the payload. `take().read_to_end()` loops until
+    // `read_len` bytes are read or EOF is reached.
+    let mut buf = Vec::with_capacity(read_len);
+    f.take(read_len as u64).read_to_end(&mut buf)?;
 
-    // Find the ff ff ff ff terminator in the buffer.
-    let term_pos = find_terminator(&buf);
-    let payload = &buf[..term_pos];
-
-    Ok(decode_payload(payload))
-}
-
-/// Find the position of the first `ff ff ff ff` sequence in `buf`.
-/// Returns `buf.len()` if not found (decode everything).
-fn find_terminator(buf: &[u8]) -> usize {
-    for i in 0..buf.len().saturating_sub(3) {
-        if buf[i] == 0xff && buf[i + 1] == 0xff && buf[i + 2] == 0xff && buf[i + 3] == 0xff {
-            return i;
-        }
-    }
-    buf.len()
+    // `decode_payload` stops at the `ff ff ff ff` terminator only when it
+    // starts on a token boundary. A byte-wise search would also match the
+    // terminator pattern inside a multi-byte intensity value (for example
+    // `fd ff ff` followed by an `ff` prefix byte) and cut the payload short.
+    Ok(decode_payload(&buf))
 }
 
 #[cfg(test)]
@@ -277,26 +269,19 @@ mod tests {
     }
 
     #[test]
-    fn find_terminator_locates_first_match() {
-        let buf = [0x01, 0x02, 0xff, 0xff, 0xff, 0xff, 0x03];
-        assert_eq!(find_terminator(&buf), 2);
-    }
-
-    #[test]
-    fn find_terminator_returns_len_when_absent() {
-        let buf = [0x01, 0x02, 0xff, 0xff, 0xff];
-        assert_eq!(find_terminator(&buf), buf.len());
-    }
-
-    #[test]
-    fn find_terminator_ignores_runs_shorter_than_four() {
-        let buf = [0xff, 0xff, 0xff, 0x00, 0x01];
-        assert_eq!(find_terminator(&buf), buf.len());
-    }
-
-    #[test]
-    fn find_terminator_on_empty_buffer() {
-        assert_eq!(find_terminator(&[]), 0);
+    fn terminator_pattern_inside_value_does_not_stop_decode() {
+        // `fd ff ff` is a 3-byte token with intensity 0xffff; the following
+        // `ff` starts a 5-byte token whose value begins with `ff`. The bytes
+        // `ff ff ff ff` appear at index 2, which is not a token boundary, so
+        // decoding must continue to the real terminator at index 9.
+        let data: Vec<u8> = vec![
+            0x05, 0xfd, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+        ];
+        let pts = decode_payload(&data);
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0].raw_mz_bin, 5);
+        assert_eq!(pts[0].raw_intensity, 0xffff);
+        assert_eq!(pts[1].raw_intensity, 0xff);
     }
 
     /// Writes `data` to a uniquely-named file under the OS temp dir and
@@ -331,6 +316,22 @@ mod tests {
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].raw_mz_bin, 41);
         assert_eq!(points[0].raw_intensity, 1);
+    }
+
+    #[test]
+    fn read_scan_block_keeps_value_that_contains_terminator_bytes() {
+        let mut data = vec![0u8; 56];
+        data.extend_from_slice(&[
+            0x05, 0xfd, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+        ]);
+        let file_size = data.len() as u64;
+        let path = write_temp_scan_file("value_contains_terminator", &data);
+        let points = read_scan_block(&path, 0, 1000, 13, file_size).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].raw_intensity, 0xffff);
+        assert_eq!(points[1].raw_intensity, 0xff);
     }
 
     #[test]

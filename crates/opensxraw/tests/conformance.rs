@@ -16,37 +16,66 @@ use openmassspec_core::{Analyzer, Polarity, SpectrumSource};
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
 
-fn fixture_wiff_candidates() -> Vec<PathBuf> {
-    vec![
-        // CI / repo-root corpus dir (gitignored; populated by ci.yml's
-        // "Download corpus fixture for conformance tests" step). This is
-        // the one CI actually uses. The `.wiff.scan` sibling is downloaded
-        // alongside it into the same directory.
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/PXD022088/Rcor2KOESC1.wiff"),
-        // Local dev out-of-tree corpus checkout (see CORPUS.md).
-        PathBuf::from("/workspaces/Projects/Data/SRaw/PXD022088/Rcor2KOESC1.wiff"),
-    ]
+/// Root of an out-of-tree corpus checkout (see CORPUS.md), laid out as
+/// `<root>/<PXD accession>/<run>.wiff`. Set via `OPENSXRAW_CORPUS`.
+fn corpus_root() -> Option<PathBuf> {
+    std::env::var_os("OPENSXRAW_CORPUS").map(PathBuf::from)
 }
 
-/// Open the corpus fixture, or return `None` (with a skip message) when it
-/// is absent from every candidate location - the corpus mostly lives out of
-/// tree, so these tests skip cleanly rather than failing the build when
-/// neither the CI-downloaded nor the local-dev copy is present.
-fn open_fixture_or_skip() -> Option<Reader> {
-    let candidates = fixture_wiff_candidates();
-    let Some(path) = candidates.iter().find(|p| p.exists()) else {
-        eprintln!(
-            "skip: corpus not present at any of: {}",
-            candidates
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        return None;
-    };
-    Some(Reader::open(path).expect("Reader::open failed"))
+/// When `REQUIRE_CORPUS=1`, a missing fixture is a test failure instead of
+/// a skip, so CI jobs that download fixtures cannot silently pass without
+/// exercising the decode path.
+fn corpus_required() -> bool {
+    std::env::var("REQUIRE_CORPUS").is_ok_and(|v| v == "1")
 }
+
+/// Candidate locations for a corpus fixture given its path relative to the
+/// corpus root: `$OPENSXRAW_CORPUS/<rel>` first, then the repo-root
+/// `corpus/` directory (gitignored; populated by ci.yml's "Download corpus
+/// fixture for conformance tests" step).
+fn fixture_candidates(rel: &str) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(root) = corpus_root() {
+        v.push(root.join(rel));
+    }
+    v.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus")
+            .join(rel),
+    );
+    v
+}
+
+/// Resolve a corpus fixture, or return `None` (with a skip message) when it
+/// is absent from every candidate location. Panics instead of skipping when
+/// `REQUIRE_CORPUS=1`.
+fn find_fixture_or_skip(rel: &str) -> Option<PathBuf> {
+    let candidates = fixture_candidates(rel);
+    if let Some(path) = candidates.iter().find(|p| p.exists()) {
+        return Some(path.clone());
+    }
+    let msg = format!(
+        "corpus fixture {rel} not present at any of: {}",
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if corpus_required() {
+        panic!("REQUIRE_CORPUS=1 but {msg}");
+    }
+    eprintln!("skip: {msg}");
+    None
+}
+
+/// Open the main QTRAP fixture, or skip when it is absent.
+fn open_fixture_or_skip() -> Option<Reader> {
+    let path = find_fixture_or_skip(MAIN_FIXTURE)?;
+    Some(Reader::open(&path).expect("Reader::open failed"))
+}
+
+const MAIN_FIXTURE: &str = "PXD022088/Rcor2KOESC1.wiff";
 
 #[test]
 fn test_start_timestamp_from_summary_info() {
@@ -119,6 +148,11 @@ fn test_conformance_invariants() {
     };
     let n = assert_source_invariants(&mut reader).expect("conformance invariants failed");
     assert!(n > 0, "expected at least one spectrum");
+    assert_eq!(reader.scan_read_failures(), 0, "scan block reads failed");
+    assert_eq!(
+        reader.run_metadata().native_id_format.accession,
+        "MS:1000776"
+    );
     println!("Conformance passed: {} spectra", n);
 }
 
@@ -192,6 +226,7 @@ fn test_ms2_has_precursor() {
     let ms2: Vec<_> = spectra.iter().filter(|s| s.ms_level == 2).collect();
     assert!(!ms2.is_empty(), "expected at least one MS2 spectrum");
 
+    let first_ms1_index = spectra.iter().position(|s| s.ms_level == 1);
     let mut with_selected_mz = 0;
     for s in &ms2 {
         let precursor = s
@@ -201,6 +236,16 @@ fn test_ms2_has_precursor() {
         assert!(
             precursor.precursor_native_id.is_some(),
             "MS2 spectrum {} has no precursor_native_id",
+            s.native_id
+        );
+        // Every MS2 after the first MS1 survey scan references a real scan.
+        if first_ms1_index.is_some_and(|i| i < s.index) {
+            let id = precursor.precursor_native_id.as_deref().unwrap_or("");
+            assert!(id.starts_with("scan="), "unexpected precursor id {id}");
+        }
+        assert!(
+            s.native_id.starts_with("scan="),
+            "unexpected native id {}",
             s.native_id
         );
         if precursor.selected_mz.is_some() {
@@ -233,8 +278,22 @@ fn test_ms2_has_precursor() {
 /// `TOFCalibrationData` stream, used to validate the calibrated m/z path
 /// (the main `Rcor2KOESC1` fixture above is QTRAP-only and has no
 /// calibration stream - see `docs/format/04-legacy-wiff-calibration.md`).
-fn calibrated_fixture_wiff() -> PathBuf {
-    PathBuf::from("/workspaces/Projects/Data/SRaw/PXD056391/TO14810HD.wiff")
+///
+/// Not downloaded by CI; resolved only via `OPENSXRAW_CORPUS`, and always
+/// skipped when absent (even under `REQUIRE_CORPUS=1`, which covers only the
+/// fixture CI fetches).
+fn calibrated_fixture_or_skip() -> Option<Reader> {
+    const REL: &str = "PXD056391/TO14810HD.wiff";
+    let Some(root) = corpus_root() else {
+        eprintln!("skip: OPENSXRAW_CORPUS not set; {REL} is not fetched by CI");
+        return None;
+    };
+    let path = root.join(REL);
+    if !path.exists() {
+        eprintln!("skip: corpus not present at {}", path.display());
+        return None;
+    }
+    Some(Reader::open(&path).expect("Reader::open failed"))
 }
 
 #[test]
@@ -257,12 +316,9 @@ fn test_qtrap_fixture_gets_tqms_and_positive_polarity() {
 
 #[test]
 fn test_calibrated_mz_is_physically_plausible() {
-    let path = calibrated_fixture_wiff();
-    if !path.exists() {
-        eprintln!("skip: corpus not present at {}", path.display());
+    let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
-    }
-    let mut reader = Reader::open(&path).expect("Reader::open failed");
+    };
     let spectra: Vec<_> = reader.iter_spectra().collect();
 
     let with_peaks: Vec<_> = spectra.iter().filter(|s| !s.mz.is_empty()).collect();
@@ -291,12 +347,9 @@ fn test_tripletof_fixture_gets_tofms_and_positive_polarity() {
     // (TripleTOF-family), so every spectrum should get TOFMS, and its ISVF
     // ion spray voltage is positive, so polarity should resolve to Positive
     // - same corpus-wide invariant as the QTRAP fixture above.
-    let path = calibrated_fixture_wiff();
-    if !path.exists() {
-        eprintln!("skip: corpus not present at {}", path.display());
+    let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
-    }
-    let mut reader = Reader::open(&path).expect("Reader::open failed");
+    };
     let spectra: Vec<_> = reader.iter_spectra().collect();
     assert!(!spectra.is_empty());
     for s in &spectra {
