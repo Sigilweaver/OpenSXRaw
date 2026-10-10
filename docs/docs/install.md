@@ -4,14 +4,18 @@ sidebar_position: 2
 
 # Install
 
-OpenSXRaw is not yet published to crates.io. Until then, use it from
-source.
+OpenSXRaw is published to crates.io and PyPI.
 
 ## Rust
 
-```toml
-[dependencies]
-opensxraw = { git = "https://github.com/Sigilweaver/OpenSXRaw" }
+```sh
+cargo add opensxraw
+```
+
+## Python
+
+```sh
+pip install opensxraw
 ```
 
 OpenSXRaw needs Rust 1.88 or newer. There are no native or system
