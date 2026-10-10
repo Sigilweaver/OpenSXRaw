@@ -2,8 +2,8 @@
 
 Current size: 93.2 GB across 23 PRIDE projects, 250 runs. 199 of the 250
 are complete legacy `.wiff` + `.wiff.scan` pairs (the format this reader
-currently supports); the remaining 51 are `.wiff2` files, which are
-investigated and documented but not yet readable - see
+currently supports); the remaining 51 are `.wiff2` files, an encrypted
+container that this project does not support - see
 [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
 
 The corpus covers both TripleTOF (high-resolution, DDA/SWATH) and QTRAP
@@ -46,8 +46,6 @@ any file back to its source, use the PRIDE accession:
   DDA/SWATH/MRM proteomics acquisitions rather than every SCIEX
   application area (e.g. small-molecule/metabolomics workflows are
   under-represented).
-- `.wiff2` support is blocked on the container's encryption scheme not
-  yet being understood (see
+- `.wiff2` is an encrypted container and is out of scope (see
   [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md));
-  the 51 `.wiff2` files in the corpus are retained for whenever that
-  changes, not currently used for conformance testing.
+  the 51 `.wiff2` files in the corpus are not used for conformance testing.

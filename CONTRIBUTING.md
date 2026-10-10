@@ -55,16 +55,9 @@ status of the project. If you can only explain a field by having watched
 what Analyst shows for it, don't write that down - keep digging in the
 bytes instead, or flag it as unresolved.
 
-The `.wiff2` container is proprietary-encrypted and currently unsolved
-(see [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md)).
-Further structural/cryptanalytic reasoning from the ciphertext itself is
-welcome, as long as it stays strictly clean-room public-domain analysis.
-Do not disassemble or decompile any SCIEX binary, and do not send us key material obtained
-from a leak, a breach, or any other unauthorized disclosure - we will not
-accept or use it, regardless of how it's documented. If you believe you
-have a legitimate external lead (e.g. something SCIEX has published
-themselves), open an issue describing it before doing anything else so
-we can assess it together.
+The `.wiff2` container is encrypted. Decrypting it is out of scope for this
+project and contributions aimed at doing so will not be accepted (see
+[docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md)).
 
 **Pull requests that were written or verified with the help of proprietary
 vendor software will not be accepted**, regardless of code quality, since
@@ -76,8 +69,8 @@ tool output, vendor source, or values you learned by running vendor
 software. We'll investigate and fix it from public references. Detailed
 issue reports are genuinely useful and will be acted on.
 
-`/workspaces/Projects/Data` (or wherever the corpus lives in your checkout)
-holds real research data that can be expensive to redownload. Treat it as
+The local corpus checkout (the directory `OPENSXRAW_CORPUS` points at for
+the conformance tests) holds real research data that can be expensive to redownload. Treat it as
 read-only except for adding cache/derived files you clearly own.
 
 ## Security

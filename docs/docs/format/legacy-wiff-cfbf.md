@@ -52,9 +52,5 @@ and QTRAP-specific experiment headers.
 
 ## Relationship to .wiff2
 
-The compliance-auditing streams here (`CFR_INFO` for 21 CFR Part 11,
-`GLPTables` for GLP) are the direct historical precedent for `.wiff2`:
-SCIEX later consolidated this entire structure into a single
-SQLCipher-encrypted database, natively satisfying the same compliance
-requirements by denying external read/write access to the metadata
-without the vendor SDK. See [.wiff2 container](./wiff2-container).
+SCIEX's newer `.wiff2` format replaces this container with a single
+encrypted file. It is not supported; see [.wiff2 container](./wiff2-container).
