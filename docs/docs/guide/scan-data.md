@@ -38,16 +38,14 @@ files without that stream (MRM/targeted, plain SWATH) they stay `None`.
 `retention_time_sec` is the `Idx` per-record retention time (stored on
 disk in minutes) converted to seconds.
 
-## Fields not yet populated
+## Fields not populated
 
 The analyzer is `TOFMS` for TripleTOF/ZenoTOF files and `TQMS` for QTRAP
 files (see [Instrument families](./instrument-families)). The reader leaves
 `total_ion_current` unset - the `Idx` TIC is in physically
 calibrated cps and does not match the sum of the raw intensity counts, so
 the mzML writer recomputes TIC from the intensity array instead. `scan_mode`
-is also left unset (`None`): no currently-decoded stream carries a
-per-scan or per-experiment centroid/profile indicator, and unconditionally
-reporting `Profile` (the prior behavior) mislabeled centroided
-acquisitions - see [Reader: what the reader does not yet
-do](./reader#what-the-reader-does-not-yet-do). See the [format
+is also left unset (`None`): no decoded stream carries a per-scan or
+per-experiment centroid/profile indicator - see [Reader: what the reader
+does not do](./reader#what-the-reader-does-not-do). See the [format
 overview](../format/overview) for the full list of known limitations.

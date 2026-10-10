@@ -34,7 +34,7 @@ Tracks the execution of a specific sample acquisition:
   [Legacy .wiff.scan blocks](./legacy-wiff-scan) for its record layout.
 - `Sample1/DDERealTimeData`, `DDERealTimeDataEx` - real-time MS metadata,
   including precursor m/z for data-dependent MS2 scans. Not yet decoded
-  by this reader - see [Reader](../guide/reader#what-the-reader-does-not-yet-do).
+  by this reader - see [Reader](../guide/reader#what-the-reader-does-not-do).
 - `Sample1/SampleDABE/CFR_INFO` - 21 CFR Part 11 compliance data
   (electronic signatures, record protection).
 - `Sample1/TDCStatistics`, `TOFCalibrationData` - TOF calibration

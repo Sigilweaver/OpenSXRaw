@@ -18,8 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RuntimeError`) for an out-of-range index.
 - Minimum supported Rust version is 1.88 (was 1.85). `Cargo.lock` is now
   committed.
-- `.wiff2` is documented as an encrypted container that is out of scope
-  for this project; the earlier investigation notes were removed.
+- `.wiff2` is documented as an encrypted container: out of scope and not
+  supported.
+- Conformance tests locate fixtures via `OPENSXRAW_CORPUS` (replacing a
+  hardcoded `/workspaces/...` path) and fail instead of skipping when
+  `REQUIRE_CORPUS=1`. CI sets both and downloads fixtures with
+  `curl -fsSL --retry 3`.
+
+### Removed
+
+- `.wiff2` investigation notes.
 
 ### Fixed
 
@@ -40,13 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer parses a partial buffer.
 - Guide pages no longer claim m/z is uncalibrated, precursors are not
   decoded, or every spectrum is TOFMS.
-
-### Testing
-
-- Conformance tests locate fixtures via `OPENSXRAW_CORPUS` (replacing a
-  hardcoded `/workspaces/...` path) and fail instead of skipping when
-  `REQUIRE_CORPUS=1`. CI sets both and downloads fixtures with
-  `curl -fsSL --retry 3`.
 
 ## [0.3.0] - 2026-09-28
 

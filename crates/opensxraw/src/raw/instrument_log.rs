@@ -75,12 +75,9 @@
 //!
 //! Note: `PXD022088/Rcor2KOESC1.wiff` (the small fixture used by
 //! `tests/conformance.rs` and referenced in `docs/format/02-legacy-wiff-scan.md`)
-//! was previously mislabeled "TripleTOF 5600" in both of those places - a
-//! stale/incorrect label, contradicted by its own lack of a
-//! `TOFCalibrationData` stream (`docs/format/04-legacy-wiff-calibration.md`
-//! already correctly called it "QTRAP-family") and now also by this
-//! stream's `Component ID: QTRAP 6500+`. Both mentions are corrected
-//! alongside this module landing.
+//! is a QTRAP 6500+ run: this stream's `Component ID: QTRAP 6500+` agrees
+//! with its lack of a `TOFCalibrationData` stream
+//! (`docs/format/04-legacy-wiff-calibration.md`).
 //!
 //! # Byte layout: deliberately not fully reverse-engineered
 //!

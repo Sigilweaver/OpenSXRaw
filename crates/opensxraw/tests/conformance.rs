@@ -2,10 +2,9 @@
 //!
 //! Fixture: PXD022088/Rcor2KOESC1 - a QTRAP 6500+ DDA run (596 KB .wiff,
 //! 1.9 MB .wiff.scan). The smallest complete legacy pair in the corpus.
-//! Previously mislabeled "TripleTOF 5600" here - corrected per the
-//! `Log` stream self-identification record found for issue #4 (see
+//! The model comes from the `Log` stream self-identification record (see
 //! `raw::instrument_log`), which agrees with this file's lack of a
-//! `TOFCalibrationData` stream and `ExperimentTOF` method stream (issue #8's
+//! `TOFCalibrationData` stream and `ExperimentTOF` method stream (the
 //! TOF-vs-quad/trap analyzer family signal - see `raw::calibration`) and
 //! with this file's free-text "Monash_6500" instrument-name hint.
 //! `test_calibrated_mz_is_physically_plausible` below uses a different,

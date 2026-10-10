@@ -54,18 +54,17 @@ position in the `Idx` stream.
 - **Polarity**: from the sign of the ion spray voltage in the method's
   `IonSourceParamsTable`.
 
-## What the reader does not yet do
+## What the reader does not do
 
-- **QTRAP m/z**: no clean-room calibration source has been found for
-  QTRAP files, so their `mz` values are raw bins.
+- **QTRAP m/z**: no clean-room calibration source is known for QTRAP
+  files, so their `mz` values are raw bins.
 - **Full TOF recalibration table**: only the first `(slope, intercept)`
   pair of `TOFCalibrationData` is used as a per-file constant.
 - **Charge state and isolation window**: not decoded.
 - **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
-  every spectrum. No stream decoded so far (`Idx`, `DDERealTimeDataEx`,
+  every spectrum. No decoded stream (`Idx`, `DDERealTimeDataEx`,
   `SummaryInformation`) carries a reliable per-scan or per-experiment
-  centroid/profile indicator; a prior version of the reader hardcoded
-  `Profile` here, which mislabeled centroided acquisitions.
+  centroid/profile indicator.
 
 If a scan block cannot be read from the `.wiff.scan` file (an I/O error,
 or a block that starts past the end of the file),
