@@ -25,11 +25,11 @@ true time-of-flight, unlike TripleTOF.
 
 ## How the reader tells them apart
 
-It currently doesn't. `Reader` reads scan data identically for both
-families via the shared `Idx`/`.wiff.scan` mechanism, and reports every
-spectrum with the same `Analyzer::TOFMS` metadata regardless of source
-instrument - see
-[Reader: what the reader does not yet do](./reader#what-the-reader-does-not-yet-do).
-If you need to distinguish TripleTOF from QTRAP output today, check the
-method-subtree contents yourself (`ExperimentTOF` vs `sMRM`/`sMRMEX`) - a
-proper instrument-family detector is not yet built into the reader API.
+The reader uses the `TOFCalibrationData` stream. TripleTOF and ZenoTOF
+files carry a `(slope, intercept)` body there; QTRAP files carry only a
+header. When the body is present, spectra are reported with
+`Analyzer::TOFMS` and calibrated m/z; otherwise with `Analyzer::TQMS` and
+raw-bin m/z. Across the 200-file local corpus this signal agreed with the
+presence of `ExperimentTOF` method streams and with every embedded
+instrument-name hint. When the `Log` stream carries a self-identification
+record, `run_metadata().instrument` also names the specific model.

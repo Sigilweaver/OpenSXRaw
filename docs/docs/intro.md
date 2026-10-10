@@ -35,9 +35,9 @@ public corpus of mass-spectrometry datasets (PRIDE accessions); see
 | `.wiff.scan` block index and token-stream decoding | supported |
 | TripleTOF instrument family                   | supported |
 | QTRAP instrument family                       | supported |
-| `.wiff2` container                            | investigated, not readable - see [Format specification](./format/wiff2-container) |
-| m/z calibration (`ExperimentTOF` constants)    | not yet decoded - m/z is a raw time-bin integer |
-| MS2 precursor m/z (`DDERealTimeDataEx`)        | not yet decoded |
+| `.wiff2` container                            | not supported (encrypted, out of scope) - see [Format specification](./format/wiff2-container) |
+| m/z calibration (`TOFCalibrationData`)        | TripleTOF/ZenoTOF: calibrated; QTRAP: raw time-bin values |
+| MS2 precursor m/z (`DDERealTimeDataEx`)        | decoded on DDA files (cycle-linked heuristic) |
 
 Validated against real-world TripleTOF 5600 corpus data end to end (2228
 scans decoded from a single fixture run); broader corpus-wide conformance
