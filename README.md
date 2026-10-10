@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/opensxraw.svg)](https://pypi.org/project/opensxraw/)
 [![docs.rs](https://img.shields.io/docsrs/opensxraw)](https://docs.rs/opensxraw)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Rust MSRV](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 > Part of the [OpenMassSpec](https://github.com/Sigilweaver/OpenMassSpec)
 > stack for mass spectrometry raw-file access.
@@ -15,6 +15,13 @@ spectrometry data files, with no SCIEX SDK or software dependency.
 Covers the TripleTOF and QTRAP instrument families.
 
 Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxraw/docs)
+
+## Known issues
+
+- TripleTOF files: every scan is labelled MS2, including MS1 survey
+  scans. The scan-index byte the reader uses for MS level is 6 on every
+  TripleTOF scan, so it cannot separate MS1 from MS2. QTRAP files are
+  not affected.
 
 ## Install
 

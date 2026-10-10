@@ -2,6 +2,8 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use cfb::CompoundFile;
 use openmassspec_core::{
@@ -32,7 +34,7 @@ fn idx_stream(sample: &str) -> String {
 /// The CFBF stream path for the standard OLE SummaryInformation property
 /// set. The leading `\x05` is the OLE convention marking a stream name as
 /// reserved/special rather than user data. See `raw::summary_info` for the
-/// investigation behind using this as the acquisition start timestamp. This
+/// evidence for using this as the acquisition start timestamp. This
 /// stream lives at the container root rather than under a sample's storage.
 const SUMMARY_INFO_STREAM: &str = "\x05SummaryInformation";
 
@@ -52,14 +54,14 @@ fn dde_stream(sample: &str) -> String {
 
 /// The CFBF stream path for the acquisition device status log of the given
 /// sample, which (among other things) carries the mass spectrometer's own
-/// self-identification record - see `raw::instrument_log` for the issue #4
-/// round 3 investigation behind using this for the instrument model.
+/// self-identification record - see `raw::instrument_log` for the evidence
+/// for using this for the instrument model.
 fn log_stream(sample: &str) -> String {
     format!("{SAMPLE_SUBTREE_STORAGE}/{sample}/Log")
 }
 
 /// How many `MethodN` subtrees to probe for an ion spray voltage parameter
-/// (issue #26). Bounded rather than enumerated via `list_samples`-style
+/// parameter. Bounded rather than enumerated via `list_samples`-style
 /// directory walk because `MethodSubtree` isn't nested per sample the way
 /// `SampleSubtree` is - see the caveat on `find_ion_source_parameters`.
 const MAX_METHOD_PROBE: u32 = 4;
@@ -69,9 +71,30 @@ const MAX_METHOD_PROBE: u32 = 4;
 /// `IS`, plus occasionally `CAD`/`IHT`/`COLUMN TEM`); this leaves slack.
 const MAX_PARAMETER_PROBE: u32 = 8;
 
+/// Read an optional CFBF stream. A missing stream is a normal condition and
+/// returns `None` quietly; any other open or read error is logged at `warn`
+/// level before returning `None`, so optional metadata never fails `open`
+/// but is never dropped silently either.
+fn read_optional_stream(comp: &mut CompoundFile<std::fs::File>, path: &str) -> Option<Vec<u8>> {
+    let mut stream = match comp.open_stream(path) {
+        Ok(stream) => stream,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            log::warn!("opensxraw: cannot open stream {path}: {e}");
+            return None;
+        }
+    };
+    let mut buf = Vec::new();
+    if let Err(e) = stream.read_to_end(&mut buf) {
+        log::warn!("opensxraw: failed to read stream {path}: {e}");
+        return None;
+    }
+    Some(buf)
+}
+
 /// Find the named ion source parameters for a `.wiff` file's active
 /// acquisition method, if present - see `raw::ion_source` for the
-/// investigation behind the voltage-based polarity signal (issue #26).
+/// evidence for the voltage-based polarity signal.
 ///
 /// Tries `MethodN`'s first device/period/experiment
 /// (`MethodSubtree/MethodN/DeviceMethod0/Period0/Experiment0/
@@ -97,14 +120,9 @@ fn find_ion_source_parameters(comp: &mut CompoundFile<std::fs::File>) -> Vec<Sou
         let mut parameters = Vec::new();
         for param_idx in 0..MAX_PARAMETER_PROBE {
             let path = format!("{base}/Parameter{param_idx}/ParameterData");
-            let mut stream = match comp.open_stream(&path) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let mut buf = Vec::new();
-            if stream.read_to_end(&mut buf).is_err() {
+            let Some(buf) = read_optional_stream(comp, &path) else {
                 continue;
-            }
+            };
             if let Some(param) = SourceParameter::from_bytes(&buf) {
                 parameters.push(param);
             }
@@ -139,9 +157,13 @@ fn sort_sample_names(names: &mut [String]) {
     });
 }
 
+/// Size of the per-block header that precedes each scan payload in the
+/// `.wiff.scan` file (see `raw::scan`).
+const SCAN_HEADER_LEN: u64 = 56;
+
 /// Open state for a `.wiff` / `.wiff.scan` pair.
 pub struct Reader {
-    /// Stem name of the file (e.g. "Rcor2KOESC1") used in native IDs.
+    /// Stem name of the file (e.g. "Rcor2KOESC1").
     pub stem: String,
     /// Selected WIFF sample subtree.
     pub sample: String,
@@ -172,8 +194,13 @@ pub struct Reader {
     pub ion_source_parameters: Vec<SourceParameter>,
     /// Per-file polarity, derived from the acquisition method's ion spray
     /// voltage sign - see `raw::ion_source` and `find_ion_source_parameters`.
-    /// `None` when no `ISVF`/`IS` parameter was found (issue #26).
+    /// `None` when no `ISVF`/`IS` parameter was found.
     pub polarity: Option<Polarity>,
+    /// Number of scan blocks whose `.wiff.scan` read failed (an I/O error, or
+    /// a block that starts past the end of the file) during `iter_spectra`. Such spectra are still yielded (with
+    /// empty arrays and an `opensxraw.scan_read_error` extra entry) so the
+    /// iterator shape is unchanged; see `Reader::scan_read_failures`.
+    scan_read_failures: Arc<AtomicUsize>,
 }
 
 impl Reader {
@@ -300,56 +327,31 @@ impl Reader {
         // metadata: not every `.wiff` file carries this stream (see
         // `raw::summary_info`'s corpus survey), so any failure here just
         // leaves `start_timestamp` as `None` rather than failing `open`.
-        let start_timestamp = comp
-            .open_stream(SUMMARY_INFO_STREAM)
-            .ok()
-            .and_then(|mut stream| {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).ok()?;
-                parse_create_timestamp(&buf)
-            });
+        let start_timestamp = read_optional_stream(&mut comp, SUMMARY_INFO_STREAM)
+            .and_then(|buf| parse_create_timestamp(&buf));
 
         // Read the mass spectrometer's self-identification record from the
         // Log stream, if present and recognizable. Optional metadata, same
         // as `start_timestamp` above - see `raw::instrument_log`.
-        let instrument_info = comp
-            .open_stream(log_stream(sample))
-            .ok()
-            .and_then(|mut stream| {
-                let mut buf = Vec::new();
-                stream.read_to_end(&mut buf).ok()?;
-                parse_instrument_info(&buf)
-            });
+        let instrument_info = read_optional_stream(&mut comp, &log_stream(sample))
+            .and_then(|buf| parse_instrument_info(&buf));
 
         // Read TOF calibration constants, if present. Absent on QTRAP-only
         // files - see `raw::calibration`. Whether this parses to `Some` is
-        // also used below as the TOF-vs-quad/trap analyzer family signal
-        // for issue #8 - see the comment on `analyzer` in `iter_spectra`.
-        let calibration =
-            comp.open_stream(calibration_stream(sample))
-                .ok()
-                .and_then(|mut stream| {
-                    let mut buf = Vec::new();
-                    stream.read_to_end(&mut buf).ok()?;
-                    Calibration::from_bytes(&buf)
-                });
+        // also used as the TOF-vs-quad/trap analyzer family signal - see
+        // the comment on `analyzer` in `iter_spectra`.
+        let calibration = read_optional_stream(&mut comp, &calibration_stream(sample))
+            .and_then(|buf| Calibration::from_bytes(&buf));
 
         // Read DDA precursor-selection records, if present. Absent on files
         // without IDA/DDA-style precursor triggering - see `raw::dde`.
-        let dde_records = comp
-            .open_stream(dde_stream(sample))
-            .ok()
-            .map(|mut stream| {
-                let mut buf = Vec::new();
-                let _ = stream.read_to_end(&mut buf);
-                DdeRecord::parse_stream(&buf)
-            })
+        let dde_records = read_optional_stream(&mut comp, &dde_stream(sample))
+            .map(|buf| DdeRecord::parse_stream(&buf))
             .unwrap_or_default();
 
         // Read the ion spray voltage from the method's IonSourceParamsTable,
         // if present, and derive polarity from its sign - see
-        // `raw::ion_source` and `find_ion_source_parameters` for the full
-        // investigation (issue #26). A positive voltage means positive-mode
+        // `raw::ion_source` and `find_ion_source_parameters`. A positive voltage means positive-mode
         // acquisition, negative means negative-mode; this is standard ESI
         // physics, not something read off vendor software. Every one of the
         // 200 local corpus files has a positive value, so the `Negative`
@@ -387,7 +389,17 @@ impl Reader {
             dde_records,
             ion_source_parameters,
             polarity,
+            scan_read_failures: Arc::new(AtomicUsize::new(0)),
         })
+    }
+
+    /// Number of scan blocks that failed to read from the `.wiff.scan` file
+    /// (I/O errors, or blocks that start past the end of the file) across all `iter_spectra` calls on this reader. Each
+    /// failure is also logged at `warn` level and recorded on the affected
+    /// spectrum as the `opensxraw.scan_read_error` extra entry; the spectrum
+    /// itself is yielded with empty m/z and intensity arrays.
+    pub fn scan_read_failures(&self) -> usize {
+        self.scan_read_failures.load(Ordering::Relaxed)
     }
 }
 
@@ -419,10 +431,7 @@ fn points_to_arrays(
 
 impl SpectrumSource for Reader {
     fn run_metadata(&self) -> RunMetadata {
-        // Issue #4 rounds 1-2 ruled out every CFBF stream that looked like a
-        // plausible home for a structured instrument model field - see
-        // `raw::summary_info`'s module doc ("Round 2") for the full list.
-        // Round 3 found the actual source: the mass spectrometer's own
+        // The instrument model comes from the mass spectrometer's own
         // self-identification record in the `Log` stream (see
         // `raw::instrument_log`), populated into `self.instrument_info` at
         // `open_sample` time. `resolve_cv_term` maps its `Component ID`/
@@ -480,7 +489,12 @@ impl SpectrumSource for Reader {
             extra,
             source_file_name: format!("{}.wiff", self.stem),
             source_file_format: CvTerm::new("MS:1000562", "ABI WIFF format"),
-            native_id_format: CvTerm::new("MS:1000823", "SCIEX nativeID format"),
+            // Native IDs are emitted as `scan=N` (1-based Idx order), which is
+            // exactly the PSI-MS "scan number only nativeID format". The WIFF
+            // nativeID format (MS:1000770, `sample= period= cycle=
+            // experiment=`) is not claimed because those fields are not
+            // decoded per scan.
+            native_id_format: CvTerm::new("MS:1000776", "scan number only nativeID format"),
             instrument,
             instrument_serial_number,
             software_name: "opensxraw".to_string(),
@@ -488,10 +502,8 @@ impl SpectrumSource for Reader {
             // No Analyst acquisition software version is wired up here: the
             // only candidate source is the `DocumentSummaryInformation`
             // stream's "Analyst file type: Data file, Analyst <version>"
-            // free-text string noted in `raw::summary_info`'s module doc
-            // (Round 2 survey) - that stream isn't parsed anywhere in this
-            // crate yet, so there is nothing to wire in without new parsing
-            // work.
+            // free-text string noted in `raw::summary_info`'s module doc,
+            // and that stream is not parsed by this crate.
             acquisition_software_name: None,
             acquisition_software_version: None,
             start_timestamp: self.start_timestamp.clone(),
@@ -510,21 +522,21 @@ impl SpectrumSource for Reader {
         let records = self.idx_records.clone();
         let scan_path = self.scan_path.clone();
         let scan_file_size = self.scan_file_size;
-        let stem = self.stem.clone();
         let calibration = self.calibration;
         let dde_records = self.dde_records.clone();
         let polarity = self.polarity;
+        let stem = self.stem.clone();
+        let scan_read_failures = Arc::clone(&self.scan_read_failures);
 
-        // Analyzer family (issue #8, part 1): `calibration.is_some()` doubles
-        // as a TOF-vs-quad/trap discriminator, not just the m/z conversion
-        // flag it was added for. `TOFCalibrationData` only yields a real
+        // Analyzer family: `calibration.is_some()` doubles as a
+        // TOF-vs-quad/trap discriminator as well as the m/z conversion flag. `TOFCalibrationData` only yields a real
         // `Calibration` when its body carries an actual (slope, intercept)
         // pair; on QTRAP-only files the stream exists but is header-only (32
         // bytes, no body), so `Calibration::from_bytes` correctly returns
         // `None` there - see `raw::calibration`'s module doc.
         //
-        // Verified against the full local corpus (200 `.wiff` files,
-        // 2026-08-03): `calibration.is_some()` agrees, file-for-file, with
+        // Across the local corpus (200 `.wiff` files) `calibration.is_some()`
+        // agrees, file-for-file, with
         // two independent structural signals under
         // `MethodSubtree/Method1/DeviceMethod0/Period0/ExperimentN/` -
         // presence of an `ExperimentTOF` stream (173/200 files, always when
@@ -538,16 +550,15 @@ impl SpectrumSource for Reader {
         // calibration-present file's hint says "TripleTOF" or "ZenoTOF"
         // (including the "7600"/"ZENOTOF" ZenoTOF fixtures, confirming the
         // signal covers both TOF sub-families, not just one model). No
-        // corpus file contradicted this. `MSConfigInfo`'s byte 0x20 (probed
-        // in `raw::summary_info`'s Round 2 investigation for exact model)
-        // was re-checked here at the coarser family level too and still
-        // does not separate cleanly - value 3 alone appears in both the
+        // corpus file contradicted this. `MSConfigInfo`'s byte 0x20 (see
+        // `raw::summary_info`) does not separate the families cleanly -
+        // value 3 alone appears in both the
         // calibration-present (81 files) and calibration-absent (8 files)
         // buckets - so that field stays unused.
         //
         // `openmassspec_core::Analyzer` has no dedicated ion-trap/quad
         // hybrid variant for QTRAP; `TQMS` (triple quadrupole) is the
-        // closest fit and is what the issue itself proposed.
+        // closest fit.
         let analyzer = if calibration.is_some() {
             Analyzer::TOFMS
         } else {
@@ -586,7 +597,7 @@ impl SpectrumSource for Reader {
                 last_ids.push(cur_last_id.clone());
                 counts.push(cur_count);
                 if rec.ms_level == 1 {
-                    cur_last_id = Some(format!("file={} scan={}", stem, i + 1));
+                    cur_last_id = Some(format!("scan={}", i + 1));
                     cur_count += 1;
                 }
             }
@@ -601,7 +612,7 @@ impl SpectrumSource for Reader {
             .enumerate()
             .map(
                 move |(idx, (((rec, next_offset), last_ms1_id), ms1_count))| {
-                    let native_id = format!("file={} scan={}", stem, idx + 1);
+                    let native_id = format!("scan={}", idx + 1);
 
                     // Precursor info for MS2 spectra. `precursor_native_id`
                     // references the preceding MS1 survey scan actually seen in
@@ -613,8 +624,9 @@ impl SpectrumSource for Reader {
                     // scan before any MS1 has been seen at all (no survey scan
                     // to reference yet); fall back to an explicit "unknown"
                     // placeholder id only in that edge case, so the record still
-                    // carries the required precursor info without fabricating a
-                    // scan reference.
+                    // carries the precursor info the shared conformance suite
+                    // requires without fabricating a scan reference. Note the
+                    // placeholder is not itself a `scan=N` native ID.
                     let precursor = if rec.ms_level >= 2 {
                         let precursor_mz = ms1_count
                             .checked_sub(1)
@@ -632,20 +644,44 @@ impl SpectrumSource for Reader {
                         None
                     };
 
-                    // Decode the scan payload.
-                    let (mz, intensity) = {
-                        let points = read_scan_block(
+                    // Decode the scan payload. A read failure is not silently
+                    // turned into an empty spectrum: it is logged, counted on
+                    // the reader, and recorded in the spectrum's `extra` map.
+                    // `read_scan_block` returns an empty block (not an error)
+                    // when the block's payload starts at or past the end of
+                    // the `.wiff.scan` file, so that case is checked here.
+                    let mut extra = ::std::collections::BTreeMap::new();
+                    let payload_start = (rec.scan_offset as u64).saturating_add(SCAN_HEADER_LEN);
+                    let read = if payload_start >= scan_file_size {
+                        Err(format!(
+                            "scan block payload at offset {payload_start} is past the end \
+                             of the .wiff.scan file ({scan_file_size} bytes)"
+                        ))
+                    } else {
+                        read_scan_block(
                             &scan_path,
                             rec.scan_offset as u64,
                             rec.scan_size as u64,
                             next_offset,
                             scan_file_size,
                         )
-                        .unwrap_or_default();
-                        points_to_arrays(points, calibration)
+                        .map_err(|e| e.to_string())
                     };
+                    let points = match read {
+                        Ok(points) => points,
+                        Err(e) => {
+                            scan_read_failures.fetch_add(1, Ordering::Relaxed);
+                            log::warn!(
+                                "opensxraw: failed to read scan block for {native_id} \
+                                 (offset {}): {e}",
+                                rec.scan_offset
+                            );
+                            extra.insert("opensxraw.scan_read_error".to_string(), e);
+                            Vec::new()
+                        }
+                    };
+                    let (mz, intensity) = points_to_arrays(points, calibration);
 
-                    let mut extra = ::std::collections::BTreeMap::new();
                     extra.insert("opensxraw.idx_tic_cps".to_string(), rec.tic.to_string());
                     extra.insert(
                         "opensxraw.scan_offset".to_string(),
@@ -659,35 +695,19 @@ impl SpectrumSource for Reader {
                         scan_number: (idx + 1) as u32,
                         native_id,
                         ms_level: rec.ms_level,
-                        // Resolved for issue #26 ("polarity hardcoded to None
-                        // for every spectrum"). Earlier passes (see PR #29,
-                        // and `raw::idx`'s doc for issue #7's unrelated
-                        // finding that the Idx record's two "Unknown" bytes
-                        // are uniformly zero) ruled out every stream then
-                        // decoded by this reader - `SummaryInformation`,
-                        // `TOFCalibrationData`, `DDERealTimeDataEx`, `Idx`,
-                        // the `.wiff.scan` token stream - and correctly
-                        // flagged the per-Experiment `ExperimentHeader(Ex)`
-                        // method structures as the likely real location, but
-                        // had no corpus access to verify further.
-                        //
-                        // With corpus access, that structure was decoded
-                        // (see `raw::ion_source`): each Experiment's
-                        // `IonSourceParamsTable` carries named source
-                        // parameters, one of which is the ion spray voltage
+                        // Polarity comes from the sign of the ion spray
+                        // voltage in the method's `IonSourceParamsTable`
                         // (`ISVF` on TripleTOF/ZenoTOF, `IS` on QTRAP - see
-                        // `find_ion_source_parameters` above). Its sign directly
-                        // determines polarity by standard electrospray
-                        // physics, not a SCIEX-specific fact. Every one of
-                        // the 200 local corpus files has a positive value
-                        // (verified physically sane against 8 other
-                        // parameter types decoding correctly from the same
-                        // byte layout), so this reader has never seen a
-                        // negative-mode fixture to confirm the `Negative`
-                        // branch against - that branch rests on ESI physics
-                        // and self-consistency (the field's own embedded
-                        // name), not a verified real file, per
-                        // `raw::ion_source`'s module doc.
+                        // `raw::ion_source` and `find_ion_source_parameters`
+                        // above); the sign determines polarity by standard
+                        // electrospray physics, not a SCIEX-specific fact.
+                        // None of `SummaryInformation`, `TOFCalibrationData`,
+                        // `DDERealTimeDataEx`, `Idx` or the `.wiff.scan` token
+                        // stream carries polarity. All 200 local corpus files
+                        // have a positive value, so the `Negative` branch
+                        // rests on ESI physics and the field's own embedded
+                        // name, not a verified negative-mode file (see
+                        // `raw::ion_source`'s module doc).
                         //
                         // `polarity` is read once per file/method (like
                         // `analyzer` above), not per scan: verified across
@@ -695,40 +715,25 @@ impl SpectrumSource for Reader {
                         // cycles) that the value is identical across every
                         // Experiment within one file.
                         polarity,
-                        // Left unset rather than asserting `Profile` for every
-                        // scan (issue #27): that was wrong whenever the
-                        // source acquisition is actually centroided, and none
-                        // of the streams already decoded here carry a
-                        // per-scan or per-experiment centroid/profile
-                        // indicator to replace it with. Checked and ruled out
-                        // for this: the Idx record's byte 0x11 ("Unknown",
-                        // always observed as 0x00 - see `raw::idx`), the 64
-                        // unidentified trailing bytes of each
-                        // `DDERealTimeDataEx` record (see `raw::dde`), and the
-                        // `SummaryInformation`/`DocumentSummaryInformation`
-                        // property sets (see `raw::summary_info`) - none
-                        // distinguish centroid from profile scans in the
-                        // fixtures available in this pass. A structural
-                        // heuristic based on the decoded token stream itself
-                        // (e.g. regular fixed-grid deltas vs. sparse isolated
-                        // peaks) was considered but rejected: with no known-
-                        // centroid/known-profile ground truth to validate it
-                        // against, promoting it to real output would be
-                        // exactly the kind of unverified guess the project's
-                        // clean-room policy rules out. Finding the actual
-                        // indicator (if one exists in an undecoded stream) is
-                        // open follow-up work.
+                        // Left unset: no decoded stream carries a per-scan or
+                        // per-experiment centroid/profile indicator. Ruled
+                        // out: the Idx record's byte 0x11 ("Unknown", always
+                        // 0x00 - see `raw::idx`), the 64 unidentified trailing
+                        // bytes of each `DDERealTimeDataEx` record (see
+                        // `raw::dde`), and the `SummaryInformation`/
+                        // `DocumentSummaryInformation` property sets (see
+                        // `raw::summary_info`). A structural heuristic on the
+                        // token stream (regular fixed-grid deltas vs. sparse
+                        // isolated peaks) is not used: there is no
+                        // known-centroid/known-profile ground truth to
+                        // validate it against, and the clean-room policy rules
+                        // out unverified guesses.
                         //
-                        // Note this does not fully resolve the mzML-level
-                        // symptom: `openmassspec_core`'s mzML writer treats
-                        // any `scan_mode` other than `Some(ScanMode::Centroid)`
+                        // `openmassspec_core`'s mzML writer treats any
+                        // `scan_mode` other than `Some(ScanMode::Centroid)`
                         // (including `None`) as profile spectrum
-                        // (`MS:1000128`) for cvParam purposes. Leaving this
-                        // `None` stops OpenSXRaw from asserting a specific
-                        // mode it cannot actually verify, but does not by
-                        // itself relabel centroided acquisitions as centroid
-                        // in the mzML output - that requires the indicator
-                        // above to be found first.
+                        // (`MS:1000128`), so centroided acquisitions are still
+                        // labeled profile in mzML output.
                         scan_mode: None,
                         analyzer: Some(analyzer),
                         filter: None,
@@ -822,6 +827,7 @@ mod tests {
             dde_records: Vec::new(),
             ion_source_parameters: Vec::new(),
             polarity: None,
+            scan_read_failures: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -884,12 +890,10 @@ mod tests {
 
     #[test]
     fn iter_spectra_leaves_scan_mode_unset() {
-        // Regression guard for issue #27: scan_mode must not assert a
-        // specific mode (it used to be hardcoded to `Profile` for every
-        // spectrum, which mislabeled centroided SCIEX acquisitions) since no
-        // decoded stream currently carries a reliable per-scan or
-        // per-experiment centroid/profile indicator - see the doc comment on
-        // `iter_spectra`'s `SpectrumRecord` construction.
+        // scan_mode must not assert a specific mode: no decoded stream
+        // carries a reliable per-scan or per-experiment centroid/profile
+        // indicator - see the comment on `iter_spectra`'s `SpectrumRecord`
+        // construction.
         let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.1, 2, 50.0)]);
         let spectra: Vec<_> = reader.iter_spectra().collect();
         assert_eq!(spectra.len(), 2);
@@ -922,6 +926,52 @@ mod tests {
         reader.calibration = None;
         let spectra: Vec<_> = reader.iter_spectra().collect();
         assert_eq!(spectra[0].analyzer, Some(Analyzer::TQMS));
+    }
+
+    #[test]
+    fn iter_spectra_counts_and_records_scan_read_failures() {
+        // A `.wiff.scan` that cannot be opened must not silently become an
+        // empty spectrum: the failure is counted and recorded in `extra`.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.scan_path = PathBuf::from("/nonexistent/opensxraw/missing.wiff.scan");
+        reader.scan_file_size = 10_000;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 1);
+        assert!(spectra[0].mz.is_empty());
+        assert!(spectra[0].extra.contains_key("opensxraw.scan_read_error"));
+        assert_eq!(reader.scan_read_failures(), 1);
+    }
+
+    #[test]
+    fn iter_spectra_flags_scan_block_past_end_of_file() {
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        reader.idx_records[0].scan_offset = 5_000;
+        reader.scan_file_size = 100;
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra.len(), 1);
+        assert!(spectra[0].mz.is_empty());
+        assert!(spectra[0].extra["opensxraw.scan_read_error"].contains("past the end"));
+        assert_eq!(reader.scan_read_failures(), 1);
+    }
+
+    #[test]
+    fn native_ids_match_declared_scan_number_only_format() {
+        let mut reader =
+            reader_with_idx(vec![idx_record(0.0, 1, 100.0), idx_record(0.5, 2, 250.0)]);
+        assert_eq!(
+            reader.run_metadata().native_id_format.accession,
+            "MS:1000776"
+        );
+        let spectra: Vec<_> = reader.iter_spectra().collect();
+        assert_eq!(spectra[0].native_id, "scan=1");
+        assert_eq!(spectra[1].native_id, "scan=2");
+        assert_eq!(
+            spectra[1]
+                .precursor
+                .as_ref()
+                .and_then(|p| p.precursor_native_id.as_deref()),
+            Some("scan=1")
+        );
     }
 
     #[test]
@@ -1112,11 +1162,9 @@ mod tests {
 
     #[test]
     fn open_errors_clearly_on_multi_sample_file_instead_of_silently_truncating() {
-        // Regression test for Sigilweaver/OpenSXRaw#25: previously the
-        // hardcoded Sample1 path meant a multi-sample file would silently
-        // read only its first sample, with no error or warning that
-        // Sample2's data was skipped entirely. `open` must now refuse this
-        // rather than pick one on the caller's behalf.
+        // A multi-sample file must not be read as if it held only its first
+        // sample: `open` refuses it rather than pick one on the caller's
+        // behalf (use `open_sample`).
         let path = write_synthetic_wiff("open_multi", &["Sample1", "Sample2"]);
         let err = Reader::open(&path).err().unwrap();
         remove_synthetic_wiff(&path);

@@ -55,4 +55,4 @@ constant grid spacing and `intensity` is the true signal height. The
 reader currently exposes `mz` as the raw accumulated time-bin integer
 (not a calibrated Da value) and drops zero-intensity points as background
 artifacts - see
-[Reader](../guide/reader#what-the-reader-does-not-yet-do).
+[Reader](../guide/reader#what-the-reader-does-not-do).

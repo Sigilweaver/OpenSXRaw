@@ -34,31 +34,44 @@ for spectrum in reader.iter_spectra() {
 ```
 
 Each yielded `SpectrumRecord` carries `index`, `scan_number`, `native_id`,
-`ms_level`, `retention_time_sec`, and `mz`/`intensity` arrays. For MS2+
-scans, `precursor` is populated with a placeholder native-ID reference
-rather than a real precursor m/z (SCIEX's `Idx` stream does not store
-precursor m/z; it lives in the not-yet-decoded `DDERealTimeDataEx`
-stream) - see [Format specification](../format/legacy-wiff-cfbf) for
-where that data actually lives on disk.
+`ms_level`, `retention_time_sec`, `analyzer`, `polarity`, and
+`mz`/`intensity` arrays. Native IDs use the PSI-MS "scan number only
+nativeID format" (`MS:1000776`): `scan=N`, where `N` is the 1-based
+position in the `Idx` stream.
 
-## What the reader does not yet do
+- **m/z**: on TripleTOF/ZenoTOF files the raw time-bin values are converted
+  to m/z (Da) with the linear `(slope, intercept)` pair read from the
+  `TOFCalibrationData` stream. QTRAP files carry no calibration body, so
+  their `mz` values stay as raw bin values.
+- **Precursors**: MS2+ spectra carry a `precursor` whose
+  `precursor_native_id` points at the preceding MS1 scan (`None` if no MS1
+  has been seen yet). `selected_mz`/`target_mz` come from the
+  `DDERealTimeDataEx` stream when present, linked by DDA cycle (a
+  heuristic, see `raw::dde`); they stay `None` on files without that
+  stream (for example plain SWATH or MRM).
+- **Analyzer**: `TOFMS` when a calibration body is present (TripleTOF and
+  ZenoTOF), `TQMS` otherwise (QTRAP).
+- **Polarity**: from the sign of the ion spray voltage in the method's
+  `IonSourceParamsTable`.
 
-- **m/z calibration**: `mz` values are the raw time-bin integer read
-  directly from the token stream, not a calibrated Da value. Real
-  calibration requires the `ExperimentTOF` method-stream constants, not
-  yet decoded.
-- **Precursor m/z**: as above, MS2 spectra don't carry a real
-  `target_mz` yet.
-- **Instrument-aware analyzer**: every spectrum is currently reported with
-  a TOFMS analyzer, regardless of whether the source file is actually a
-  QTRAP acquisition (which is nominal-mass, not true time-of-flight).
-  This is a simplification in the current reader, not a property of the
-  format itself.
+## What the reader does not do
+
+- **QTRAP m/z**: no clean-room calibration source is known for QTRAP
+  files, so their `mz` values are raw bins.
+- **Full TOF recalibration table**: only the first `(slope, intercept)`
+  pair of `TOFCalibrationData` is used as a per-file constant.
+- **Charge state and isolation window**: not decoded.
 - **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
-  every spectrum. No stream decoded so far (`Idx`, `DDERealTimeDataEx`,
+  every spectrum. No decoded stream (`Idx`, `DDERealTimeDataEx`,
   `SummaryInformation`) carries a reliable per-scan or per-experiment
-  centroid/profile indicator; a prior version of the reader hardcoded
-  `Profile` here, which mislabeled centroided acquisitions.
+  centroid/profile indicator.
+
+If a scan block cannot be read from the `.wiff.scan` file (an I/O error,
+or a block that starts past the end of the file),
+the spectrum is still yielded with empty arrays, a warning is logged via
+the `log` crate, the error text is stored under the
+`opensxraw.scan_read_error` key in `extra`, and
+`Reader::scan_read_failures()` counts it.
 
 ## Error handling
 

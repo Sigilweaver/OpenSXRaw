@@ -27,7 +27,7 @@ streaming access over large acquisitions, use the Rust reader's
 | ---------------------- | --------------- | ---------------------------------------------------------- |
 | `RawReader(path)`      | constructor     | Open the `.wiff`/`.wiff.scan` pair at `path` and decode it  |
 | `scan_count`           | `int`           | Number of decoded spectra                                  |
-| `read_spectrum(index)` | `Spectrum`      | The spectrum at zero-based `index` (raises if out of range) |
+| `read_spectrum(index)` | `Spectrum`      | The spectrum at zero-based `index` (raises `IndexError` if out of range) |
 
 ```python
 print(reader.scan_count)
@@ -45,9 +45,9 @@ for i in range(reader.scan_count):
 | `ms_level`            | `int`         | MS level (1 for MS1, 2+ for MS/MS)   |
 | `retention_time_sec`  | `float`       | Retention time in seconds            |
 
-`len(spectrum)` returns the peak count. Note the m/z values are currently
-raw, uncalibrated time-bin integers, and MS2 precursor m/z is not yet
-populated; see [Scan data](./scan-data) for the details and the current
+`len(spectrum)` returns the peak count. m/z is calibrated on
+TripleTOF/ZenoTOF files and raw time-bin values on QTRAP files, and MS2
+precursor m/z is populated on DDA files from `DDERealTimeDataEx`; see [Scan data](./scan-data) for the details and the current
 [known limitations](../format/overview).
 
 ```python
