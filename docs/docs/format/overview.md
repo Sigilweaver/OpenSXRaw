@@ -25,7 +25,7 @@ the contents and layout of the streams inside it are.
 | --- | --- | --- |
 | [Legacy .wiff CFBF container](./legacy-wiff-cfbf) | Method/sample metadata stream tree, including the `Idx` scan index | Confirmed |
 | [Legacy .wiff.scan blocks](./legacy-wiff-scan) | Block index layout and the custom token-stream payload encoding | Confirmed |
-| [.wiff2 container](./wiff2-container) | SCIEX's newer, self-contained, proprietary-encrypted format | Unsolved, not readable |
+| [.wiff2 container](./wiff2-container) | SCIEX's newer single-file format; encrypted container | Not supported (out of scope) |
 
 ## Clean-room provenance
 

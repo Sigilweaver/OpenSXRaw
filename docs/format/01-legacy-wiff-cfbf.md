@@ -58,4 +58,4 @@ This storage tracks the execution of a specific sample acquisition.
 
 The legacy `.wiff` format relies heavily on compliance auditing (`CFR_INFO` for 21 CFR Part 11, `GLPTables` for Good Laboratory Practice). While the CFBF container itself is public and unencrypted, the binary contents of the methods and logs are encoded in ways that make manipulation difficult.
 
-This deep integration of regulatory compliance (anti-tampering, auditability) is the direct historical precedent for the `.wiff2` format. When moving to `.wiff2`, SCIEX consolidated this entire structure into a unified, SQLCipher-encrypted database, natively fulfilling the 21 CFR Part 11 requirements by completely denying external read/write access to the metadata without the vendor DLL (`Clearcore2.Data`).
+SCIEX's newer `.wiff2` format replaces this container with a single encrypted file. It is not supported; see [03-wiff2-container.md](03-wiff2-container.md).

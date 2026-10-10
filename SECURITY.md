@@ -46,9 +46,9 @@ Out of scope:
   acquisitions can be many GB by design.
 - Inaccurate decoding of specific instrument acquisition modes. Those are
   correctness bugs - file them as regular issues.
-- The `.wiff2` format being unreadable. That is a known, documented
-  limitation (proprietary encryption, key not recovered), not a
-  vulnerability - see
+- The `.wiff2` format being unreadable. It is an encrypted container and
+  decrypting it is out of scope for this project, not a vulnerability -
+  see
   [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
 - Vulnerabilities in third-party crates with no demonstrated exploit path
   through OpenSXRaw.

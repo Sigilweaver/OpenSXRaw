@@ -14,12 +14,9 @@ are. The `.wiff.scan` payload encoding (variable-length prefix tokens, the
 per-block header, the `Idx` stream record layout) is SCIEX-specific and
 was decoded entirely from corpus byte analysis.
 
-`.wiff2`, SCIEX's newer self-contained format, is investigated and
-documented (see
-[docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md))
-but not attributed to any external source - its proprietary encryption
-scheme remains unsolved, and nothing in that document was learned from
-SCIEX software, SDKs, or any third party.
+`.wiff2`, SCIEX's newer single-file format, is an encrypted container and
+is not supported; decrypting it is out of scope for this project (see
+[docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md)).
 
 ## Standards
 
