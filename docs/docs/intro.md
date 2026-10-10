@@ -39,9 +39,9 @@ public corpus of mass-spectrometry datasets (PRIDE accessions); see
 | m/z calibration (`TOFCalibrationData`)        | TripleTOF/ZenoTOF: calibrated; QTRAP: raw time-bin values |
 | MS2 precursor m/z (`DDERealTimeDataEx`)        | decoded on DDA files (cycle-linked heuristic) |
 
-Validated against real-world TripleTOF 5600 corpus data end to end (2228
-scans decoded from a single fixture run); broader corpus-wide conformance
-testing has not been run yet.
+CI runs the conformance suite against a public QTRAP 6500+ fixture.
+TripleTOF files currently decode with every scan labelled MS2, including
+survey scans; see Known issues in the README.
 
 ## Next steps
 

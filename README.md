@@ -16,6 +16,13 @@ Covers the TripleTOF and QTRAP instrument families.
 
 Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxraw/docs)
 
+## Known issues
+
+- TripleTOF files: every scan is labelled MS2, including MS1 survey
+  scans. The scan-index byte the reader uses for MS level is 6 on every
+  TripleTOF scan, so it cannot separate MS1 from MS2. QTRAP files are
+  not affected.
+
 ## Install
 
 **Prefer [`openmassspec-io`](https://github.com/Sigilweaver/OpenMassSpec)
