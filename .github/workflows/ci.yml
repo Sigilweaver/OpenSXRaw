@@ -7,6 +7,8 @@
 #           `.wiff` + `.wiff.scan` pair) ahead of `cargo test` so
 #           crates/opensxraw/tests/conformance.rs exercises a real decode
 #           path instead of always skipping - see Sigilweaver/OpenSXRaw#33.
+#           OPENSXRAW_CORPUS points the tests at that directory and
+#           REQUIRE_CORPUS=1 turns a missing fixture into a failure.
 
 name: CI
 
@@ -56,19 +58,25 @@ jobs:
         shell: bash
         run: |
           mkdir -p corpus/PXD022088
-          curl -sSL --user-agent "OpenSXRaw-CI/1.0" \
+          curl -fsSL --retry 3 --user-agent "OpenSXRaw-CI/1.0" \
             -o corpus/PXD022088/Rcor2KOESC1.wiff \
             "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff"
-          curl -sSL --user-agent "OpenSXRaw-CI/1.0" \
+          curl -fsSL --retry 3 --user-agent "OpenSXRaw-CI/1.0" \
             -o corpus/PXD022088/Rcor2KOESC1.wiff.scan \
             "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff.scan"
           echo "Downloaded $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff | cut -f1) .wiff + $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff.scan | cut -f1) .wiff.scan"
 
       - name: cargo test
+        env:
+          OPENSXRAW_CORPUS: ${{ github.workspace }}/corpus
+          REQUIRE_CORPUS: "1"
         run: cargo test --workspace --all-targets
 
       - name: Python binding parity
         if: matrix.os == 'ubuntu-latest'
+        env:
+          OPENSXRAW_CORPUS: ${{ github.workspace }}/corpus
+          REQUIRE_CORPUS: "1"
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install 'maturin>=1.5,<2' pytest

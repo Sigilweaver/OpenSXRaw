@@ -8,7 +8,7 @@ use openmassspec_core::{
     Activation, Analyzer, ChromatogramRecord, CvTerm, MobilityArrayKind, Polarity, PrecursorInfo,
     RunMetadata, ScanMode, SpectrumRecord, SpectrumSource,
 };
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyIndexError, PyRuntimeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -314,7 +314,7 @@ impl RawReader {
             .get(scan_index)
             .cloned()
             .map(|rec| Spectrum { rec })
-            .ok_or_else(|| PyRuntimeError::new_err(format!("scan {scan_index} out of range")))
+            .ok_or_else(|| PyIndexError::new_err(format!("scan {scan_index} out of range")))
     }
 
     fn run_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
