@@ -18,22 +18,20 @@ The `.wiff.scan` block payload is a custom byte-level prefix encoding of
 The reader decodes the pairs, accumulates the m/z deltas into an axis, and
 emits parallel `mz` (`f64`) / `intensity` (`f32`) arrays.
 
-:::caution Uncalibrated m/z
-The `mz` values are currently **raw, uncalibrated time-bin integers**, not
-physical mass-to-charge values. Physical calibration requires the
-`ExperimentTOF` method-stream constants, which are not yet decoded. The
-arrays are internally consistent (peak ordering and relative spacing are
-correct) but are not directly comparable to a calibrated vendor export.
+:::note m/z calibration
+On TripleTOF/ZenoTOF files the raw time-bin values are converted to m/z
+(Da) using the first `(slope, intercept)` pair of the `TOFCalibrationData`
+stream. QTRAP files have no calibration body, so their `mz` values are
+raw, uncalibrated bin values.
 :::
 
 ## MS level and precursor
 
 `ms_level` comes from the `Idx` MS-level flag. MS2+ spectra carry a
-`precursor`, but the `Idx` stream does not store precursor m/z, so the
-current reader emits a placeholder `precursor_native_id` with no
-`target_mz`. True precursor m/z lives in the not-yet-decoded
-`DDERealTimeDataEx` stream (data-dependent scans) or the method subtree
-(MRM/targeted scans).
+`precursor` whose `precursor_native_id` is the native ID of the preceding
+MS1 scan (`None` when no MS1 precedes it). `selected_mz`/`target_mz` come
+from the `DDERealTimeDataEx` stream on DDA files, linked by DDA cycle; on
+files without that stream (MRM/targeted, plain SWATH) they stay `None`.
 
 ## Retention time
 
@@ -42,9 +40,9 @@ disk in minutes) converted to seconds.
 
 ## Fields not yet populated
 
-The reader reports every spectrum with a `TOFMS` analyzer regardless of
-the actual instrument family (QTRAP records are not yet distinguished),
-and leaves `total_ion_current` unset - the `Idx` TIC is in physically
+The analyzer is `TOFMS` for TripleTOF/ZenoTOF files and `TQMS` for QTRAP
+files (see [Instrument families](./instrument-families)). The reader leaves
+`total_ion_current` unset - the `Idx` TIC is in physically
 calibrated cps and does not match the sum of the raw intensity counts, so
 the mzML writer recomputes TIC from the intensity array instead. `scan_mode`
 is also left unset (`None`): no currently-decoded stream carries a

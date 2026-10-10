@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Spectrum native IDs are now `scan=N` (was `file=<stem> scan=N`), and
+  `RunMetadata.native_id_format` is `MS:1000776` "scan number only nativeID
+  format". The previous `MS:1000823` is the Bruker U2 nativeID format and
+  did not describe what was emitted. Precursor references to MS1 scans
+  use the same `scan=N` form.
+- Python `RawReader.read_spectrum` raises `IndexError` (was
+  `RuntimeError`) for an out-of-range index.
+- Minimum supported Rust version is 1.88 (was 1.85). `Cargo.lock` is now
+  committed.
+- `.wiff2` is documented as an encrypted container that is out of scope
+  for this project; the earlier investigation notes were removed.
+
+### Fixed
+
+- Scan block reads no longer truncate when a single `read()` returns
+  fewer bytes than requested.
+- A `ff ff ff ff` byte run inside a multi-byte intensity value (for
+  example `fd ff ff` followed by an `ff` prefix) no longer cuts the
+  payload short; the terminator is only recognized on a token boundary.
+- `.wiff.scan` I/O errors during `iter_spectra` are no longer silently
+  turned into empty spectra: each is logged (`log` crate, `warn`),
+  recorded under `opensxraw.scan_read_error` in the spectrum's `extra`,
+  and counted by the new `Reader::scan_read_failures()`.
+- Guide pages no longer claim m/z is uncalibrated, precursors are not
+  decoded, or every spectrum is TOFMS.
+
+### Testing
+
+- Conformance tests locate fixtures via `OPENSXRAW_CORPUS` (replacing a
+  hardcoded `/workspaces/...` path) and fail instead of skipping when
+  `REQUIRE_CORPUS=1`. CI sets both and downloads fixtures with
+  `curl -fsSL --retry 3`.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added
@@ -233,11 +268,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files, covering TripleTOF and QTRAP instrument families.
 - Full CFBF stream catalog and `.wiff.scan` block/token-stream decoding,
   documented in `docs/format/`.
-- `.wiff2` container investigation: confirmed proprietary AES page
-  encryption (SQLCipher-style) and structural analysis of the
-  plaintext/ciphertext boundary - see
+- `.wiff2` is not supported (encrypted container, out of scope) - see
   [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
-  `.wiff2` support remains deferred pending new information.
 - Project renamed `OpenSRaw` -> `OpenSXRaw`.
 
 ### Known limitations
