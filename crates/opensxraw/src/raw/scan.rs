@@ -193,7 +193,7 @@ pub fn read_scan_block(
     //     block's terminator) is expected to start, per the module doc,
     //     plus slack for the next block's 56-byte header window.
     //   - `scan_offset + scan_size + 64`: this record's own declared block
-    //     extent (the Idx `scan_size` field, previously unused here), an
+    //     extent (the Idx `scan_size` field), an
     //     estimate of the same boundary that doesn't depend on any other
     //     record.
     //   - `scan_file_size`: the actual size of the file on disk - the only

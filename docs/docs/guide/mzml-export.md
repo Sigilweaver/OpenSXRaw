@@ -23,6 +23,6 @@ stream described in [Reader](./reader)) and emits PSI-MS CV-annotated
 mzML - `MS:1000562` (ABI WIFF format) as the source-file format term,
 with per-spectrum retention time, MS level, and precursor information
 carried through where the reader populated it. Given the
-[current reader limitations](./reader#what-the-reader-does-not-yet-do)
+[current reader limitations](./reader#what-the-reader-does-not-do)
 (no m/z calibration, no real MS2 precursor m/z yet), exported mzML will
 carry those same gaps until the underlying fields are decoded.

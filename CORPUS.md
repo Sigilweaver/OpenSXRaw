@@ -2,7 +2,7 @@
 
 Current size: 93.2 GB across 23 PRIDE projects, 250 runs. 199 of the 250
 are complete legacy `.wiff` + `.wiff.scan` pairs (the format this reader
-currently supports); the remaining 51 are `.wiff2` files, an encrypted
+supports); the remaining 51 are `.wiff2` files, an encrypted
 container that this project does not support - see
 [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
 
