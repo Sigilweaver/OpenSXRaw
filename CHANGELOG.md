@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
 ### Breaking
 
 - Adopts `openmassspec-core` 3.0. `Reader::iter_spectra` and
@@ -73,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed.
 - `.wiff2` is documented as an encrypted container: out of scope and not
   supported.
+- README lists known issues: m/z is not reliable on any instrument family,
+  TripleTOF/ZenoTOF MS levels are wrong, and MRM transitions are not
+  reported. These remain in 0.4.0.
+- The `opensxraw` crate package now includes `LICENSE`. The Python wheel no
+  longer installs `README.md` at the site-packages root. README links are
+  absolute so they resolve on crates.io and PyPI.
 - Conformance tests locate fixtures via `OPENSXRAW_CORPUS` (replacing a
   hardcoded `/workspaces/...` path) and fail instead of skipping when
   `REQUIRE_CORPUS=1`. CI sets both and downloads fixtures with
