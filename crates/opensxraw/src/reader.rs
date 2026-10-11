@@ -577,7 +577,6 @@ impl SpectrumSource for Reader {
         let calibration = self.calibration;
         let dde_records = self.dde_records.clone();
         let polarity = self.polarity;
-        let stem = self.stem.clone();
         let scan_read_failures = Arc::clone(&self.scan_read_failures);
 
         // Analyzer family: `calibration.is_some()` doubles as a
@@ -667,30 +666,29 @@ impl SpectrumSource for Reader {
                     let native_id = format!("scan={}", idx + 1);
 
                     // Precursor info for MS2 spectra. `precursor_native_id`
-                    // references the preceding MS1 survey scan actually seen in
-                    // this file's Idx order. `selected_mz`/`target_mz` come from
-                    // DDERealTimeDataEx when available (heuristic cycle-based
-                    // linkage - see `raw::dde`); when that stream is absent or
-                    // the linkage doesn't resolve, precursor m/z stays `None`
-                    // rather than a guess. A small number of files have an MS2
-                    // scan before any MS1 has been seen at all (no survey scan
-                    // to reference yet); fall back to an explicit "unknown"
-                    // placeholder id only in that edge case, so the record still
-                    // carries the precursor info the shared conformance suite
-                    // requires without fabricating a scan reference. Note the
-                    // placeholder is not itself a `scan=N` native ID.
+                    // is the exact native ID of the preceding MS1 survey scan
+                    // in this file's Idx order, so it always names a spectrum
+                    // this iterator yields and the mzML `spectrumRef` resolves.
+                    // `selected_mz`/`target_mz` come from DDERealTimeDataEx
+                    // when available (heuristic cycle-based linkage - see
+                    // `raw::dde`); when that stream is absent or the linkage
+                    // doesn't resolve, precursor m/z stays `None` rather than
+                    // a guess. When no MS1 scan precedes an MS2 scan (an MS2
+                    // scan before the first survey scan, or a file with no MS1
+                    // scans at all), the parent scan is unknown and
+                    // `precursor_native_id` is `None`: the precursor is still
+                    // present, but carries no reference rather than a
+                    // placeholder that names no spectrum.
                     let precursor = if rec.ms_level >= 2 {
                         let precursor_mz = ms1_count
                             .checked_sub(1)
                             .and_then(|dde_idx| dde_records.get(dde_idx))
                             .map(|dde| dde.precursor_mz);
-                        let precursor_native_id =
-                            last_ms1_id.or_else(|| Some(format!("file={} ms1ref=unknown", stem)));
                         Some(
                             PrecursorInfo::default()
                                 .with_selected_mz(precursor_mz)
                                 .with_target_mz(precursor_mz)
-                                .with_precursor_native_id(precursor_native_id),
+                                .with_precursor_native_id(last_ms1_id),
                         )
                     } else {
                         None
@@ -1070,6 +1068,52 @@ mod tests {
                 .and_then(|p| p.precursor_native_id.as_deref()),
             Some("scan=1")
         );
+    }
+
+    #[test]
+    fn precursor_native_id_is_parent_ms1_id_or_absent() {
+        // MS2 scans before the first MS1 have no known parent scan and so
+        // no precursor reference (never a placeholder); every later MS2
+        // references the exact native ID of the most recent MS1 spectrum.
+        let mut reader = reader_with_idx(vec![
+            idx_record(0.0, 2, 10.0),
+            idx_record(0.1, 2, 10.0),
+            idx_record(0.2, 1, 100.0),
+            idx_record(0.3, 2, 10.0),
+            idx_record(0.4, 1, 100.0),
+            idx_record(0.5, 2, 10.0),
+            idx_record(0.6, 2, 10.0),
+        ]);
+        let spectra = collect_spectra(&mut reader);
+        let refs: Vec<Option<&str>> = spectra
+            .iter()
+            .map(|s| {
+                s.precursor
+                    .as_ref()
+                    .and_then(|p| p.precursor_native_id.as_deref())
+            })
+            .collect();
+        assert_eq!(
+            refs,
+            vec![
+                None,
+                None,
+                None,
+                Some("scan=3"),
+                None,
+                Some("scan=5"),
+                Some("scan=5"),
+            ]
+        );
+        // Every MS2 still carries a precursor, and every reference names a
+        // spectrum the iterator yields.
+        let ids: Vec<&str> = spectra.iter().map(|s| s.native_id.as_str()).collect();
+        for (s, r) in spectra.iter().zip(&refs) {
+            assert_eq!(s.precursor.is_some(), s.ms_level >= 2);
+            if let Some(r) = r {
+                assert!(ids.contains(r), "dangling precursor ref {r}");
+            }
+        }
     }
 
     #[test]

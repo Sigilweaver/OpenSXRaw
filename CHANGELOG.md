@@ -99,6 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer parses a partial buffer.
 - Guide pages no longer claim m/z is uncalibrated, precursors are not
   decoded, or every spectrum is TOFMS.
+- An MS2 spectrum with no preceding MS1 scan now has
+  `precursor_native_id = None` instead of the placeholder
+  `"file=<stem> ms1ref=unknown"`, which named no spectrum and made mzML
+  output fail schema validation (dangling `spectrumRef`). In files with
+  no MS1 scans this affected every MS2 spectrum.
 
 ## [0.3.0] - 2026-09-28
 
