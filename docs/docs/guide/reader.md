@@ -29,6 +29,7 @@ println!("{} ({} scans)", metadata.source_file_name, scan_count);
 
 let mut reader = reader;
 for spectrum in reader.iter_spectra() {
+    let spectrum = spectrum?;
     println!("{}\t{}\t{} peaks", spectrum.native_id, spectrum.ms_level, spectrum.mz.len());
 }
 ```
@@ -73,15 +74,27 @@ position in the `Idx` stream.
   `SummaryInformation`) carries a reliable per-scan or per-experiment
   centroid/profile indicator.
 
+`iter_spectra` yields `openmassspec_core::Result<SpectrumRecord>` items.
 If a scan block cannot be read from the `.wiff.scan` file (an I/O error,
-or a block that starts past the end of the file),
-the spectrum is still yielded with empty arrays, a warning is logged via
-the `log` crate, the error text is stored under the
-`opensxraw.scan_read_error` key in `extra`, and
-`Reader::scan_read_failures()` counts it.
+or a block that starts past the end of the file), that item is an `Err`
+wrapping `opensxraw::Error::ScanRead`, and `Reader::scan_read_failures()`
+counts it. Iteration continues with the next scan, so a caller can stop
+at the first error (`?`) or skip and count.
+
+## Decoded per-file values
+
+`Reader` exposes what it decoded at open time through accessor methods:
+`idx_records()` (scan index: offset, size, retention time, MS level,
+instrument TIC), `calibration()`, `dde_records()`, `instrument_info()`,
+`ion_source_parameters()`, `polarity()`, `start_timestamp()`, `sample()`
+and `stem()`. `Reader::list_samples` and `Reader::open_sample` select one
+sample of a multi-sample `.wiff` file.
 
 ## Error handling
 
 Public functions return `opensxraw::Result<T>`. The error type is
-`opensxraw::Error`, which wraps the failure category (`Io`, `Parse`) and
-a message.
+`opensxraw::Error`, with variants `Io`, `Parse` and `ScanRead`. It is
+`#[non_exhaustive]`, so match it with a wildcard arm.
+`opensxraw::Error` converts into `openmassspec_core::Error` with `?` or
+`.into()`; inside the core error it is the boxed `Vendor` payload and can
+be recovered with `downcast_ref::<opensxraw::Error>()`.

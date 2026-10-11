@@ -15,8 +15,14 @@ use openmassspec_core::write_mzml;
 
 let mut reader = Reader::open("sample.wiff")?;
 let mut out = std::fs::File::create("output.mzML")?;
-write_mzml(&mut reader, &mut out)?;
+let summary = write_mzml(&mut reader, &mut out)?;
+println!("{} spectra written", summary.spectra_written);
 ```
+
+`write_mzml` stops at the first spectrum that fails to decode and returns
+that error. To write the readable spectra and skip the rest, use
+`write_mzml_with_options` with `RecordErrorPolicy::Skip` and report the
+skipped count from the returned `WriteSummary`.
 
 `write_mzml` iterates the reader's spectra via `SpectrumSource` (the same
 stream described in [Reader](./reader)) and emits PSI-MS CV-annotated

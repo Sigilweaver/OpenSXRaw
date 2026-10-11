@@ -11,6 +11,7 @@ use openmassspec_core::SpectrumSource;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = Reader::open("sample.wiff")?;
     for spectrum in reader.iter_spectra() {
+        let spectrum = spectrum?;
         println!("{}: {} peaks", spectrum.native_id, spectrum.mz.len());
     }
     Ok(())

@@ -17,7 +17,10 @@ reader = opensxraw.RawReader("sample.wiff")
 `RawReader` expects the paired `.wiff.scan` file to sit alongside the
 `.wiff` file (with `.scan` appended to the filename), exactly like the Rust
 reader. Opening it decodes **every** spectrum up front into memory, so
-construction is where the work happens and subsequent access is cheap. For
+construction is where the work happens and subsequent access is cheap. If
+any scan fails to decode, construction raises `RuntimeError`; the
+streaming `opensxraw.iter_spectra(path, sample=None)` raises from the
+iteration step that reaches the failing scan. For
 streaming access over large acquisitions, use the Rust reader's
 `iter_spectra` instead.
 
