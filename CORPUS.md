@@ -1,10 +1,17 @@
 # OpenSXRaw Validation Corpus
 
-Current size: 93.2 GB across 23 PRIDE projects, 250 runs. 199 of the 250
-are complete legacy `.wiff` + `.wiff.scan` pairs (the format this reader
-supports); the remaining 51 are `.wiff2` files, an encrypted
-container that this project does not support - see
-[docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
+Current size: 93.4 GB across 25 PRIDE projects, 254 files:
+
+- 201 legacy `.wiff` files (the format this reader supports). 198 have
+  their `.wiff.scan` alongside; 3 do not. One of the 198 (in PXD075858)
+  is a PRIDE submission text file named `.wiff`, not a `.wiff` container,
+  so 197 pairs are readable.
+- 53 `.wiff2` files, an encrypted container that this project does not
+  support - see
+  [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md).
+
+The 197 readable pairs are 170 TOF files (TripleTOF 6600, 5600+, 5600 and
+two ZenoTOF 7600 `.wiff` files) and 27 QTRAP files (QTRAP 5500 and 6500+).
 
 The corpus covers both TripleTOF (high-resolution, DDA/SWATH) and QTRAP
 (nominal-mass, targeted MRM/SRM) instrument families, plus a small number
@@ -35,8 +42,11 @@ small CLI over the PRIDE REST API:
 ## Provenance record
 
 `Data/SRaw/index.csv` records which PRIDE project each local file came
-from, plus its size, format generation, and pair completeness. To trace
-any file back to its source, use the PRIDE accession:
+from, plus its size, format generation, and pair completeness. It
+currently lists 23 of the 25 projects (250 files); PXD045599 and
+PXD071194 are on disk but not yet in the index. Every file sits in a
+directory named after its PRIDE accession, so any file can be traced back
+to its source:
 
     https://www.ebi.ac.uk/pride/archive/projects/<PXD_ACCESSION>
 
@@ -48,4 +58,4 @@ any file back to its source, use the PRIDE accession:
   under-represented).
 - `.wiff2` is an encrypted container and is out of scope (see
   [docs/format/03-wiff2-container.md](docs/format/03-wiff2-container.md));
-  the 51 `.wiff2` files in the corpus are not used for conformance testing.
+  the 53 `.wiff2` files in the corpus are not used for conformance testing.

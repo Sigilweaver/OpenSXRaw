@@ -45,8 +45,9 @@ for i in range(reader.scan_count):
 | `ms_level`            | `int`         | MS level (1 for MS1, 2+ for MS/MS)   |
 | `retention_time_sec`  | `float`       | Retention time in seconds            |
 
-`len(spectrum)` returns the peak count. m/z is calibrated on
-TripleTOF/ZenoTOF files and raw time-bin values on QTRAP files, and MS2
+`len(spectrum)` returns the peak count. m/z on TripleTOF/ZenoTOF files
+comes from a per-file linear calibration and is not accurate; on QTRAP
+files it is raw bin values. MS2
 precursor m/z is populated on DDA files from `DDERealTimeDataEx`; see [Scan data](./scan-data) for the details and the current
 [known limitations](../format/overview).
 

@@ -42,7 +42,9 @@ position in the `Idx` stream.
 - **m/z**: on TripleTOF/ZenoTOF files the raw time-bin values are converted
   to m/z (Da) with the linear `(slope, intercept)` pair read from the
   `TOFCalibrationData` stream. QTRAP files carry no calibration body, so
-  their `mz` values stay as raw bin values.
+  their `mz` values stay as raw bin values. Neither is accurate m/z: the
+  TOF values fail physical checks (known ions, isotope spacing) and some
+  are negative. See Known issues in the README.
 - **Precursors**: MS2+ spectra carry a `precursor` whose
   `precursor_native_id` points at the preceding MS1 scan (`None` if no MS1
   has been seen yet). `selected_mz`/`target_mz` come from the
@@ -58,8 +60,13 @@ position in the `Idx` stream.
 
 - **QTRAP m/z**: no clean-room calibration source is known for QTRAP
   files, so their `mz` values are raw bins.
-- **Full TOF recalibration table**: only the first `(slope, intercept)`
-  pair of `TOFCalibrationData` is used as a per-file constant.
+- **Correct TOF m/z**: only the first `(slope, intercept)` pair of
+  `TOFCalibrationData` is used as a per-file constant, and the result does
+  not match known ions in the corpus.
+- **TripleTOF/ZenoTOF MS level**: every scan is labelled MS2, including
+  MS1 survey scans, so TOF MS2 spectra have no precursor m/z.
+- **MRM transitions**: Q1/Q3 are not exposed and no SRM chromatograms are
+  produced.
 - **Charge state and isolation window**: not decoded.
 - **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
   every spectrum. No decoded stream (`Idx`, `DDERealTimeDataEx`,
