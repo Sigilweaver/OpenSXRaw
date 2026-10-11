@@ -63,18 +63,28 @@ const NAME_OFFSET: usize = 0x24;
 /// ParameterData` stream.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceParameter {
-    pub name: String,
-    pub value: f32,
+    pub(crate) name: String,
+    pub(crate) value: f32,
 }
 
 impl SourceParameter {
+    /// Parameter name as stored in the method, e.g. `"ISVF"`, `"GS1"`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Parameter value.
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+
     /// Parse a `ParameterData` stream's name and value.
     ///
     /// Returns `None` on any structural mismatch (too short, a name length
     /// that doesn't fit, or a name that isn't valid UTF-16) rather than
     /// erroring, since this stream is optional context, not required to
     /// read a spectrum.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub(crate) fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < NAME_OFFSET {
             return None;
         }
@@ -101,7 +111,7 @@ impl SourceParameter {
 /// Parameter names observed in the corpus for the ion spray (electrospray
 /// needle) voltage: `ISVF` on TripleTOF/ZenoTOF-family files, `IS` on
 /// QTRAP-family files - see the module doc.
-pub const ION_SPRAY_VOLTAGE_NAMES: [&str; 2] = ["ISVF", "IS"];
+pub(crate) const ION_SPRAY_VOLTAGE_NAMES: [&str; 2] = ["ISVF", "IS"];
 
 #[cfg(test)]
 mod tests {

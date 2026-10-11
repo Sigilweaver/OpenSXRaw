@@ -115,27 +115,27 @@ fn test_opens_and_reads_idx() {
         return;
     };
     assert!(
-        !reader.idx_records.is_empty(),
+        !reader.idx_records().is_empty(),
         "expected at least one valid Idx record"
     );
-    println!("Idx records: {}", reader.idx_records.len());
+    println!("Idx records: {}", reader.idx_records().len());
 
     // Verify both MS1 and MS2 scans are present.
-    let has_ms1 = reader.idx_records.iter().any(|r| r.ms_level == 1);
-    let has_ms2 = reader.idx_records.iter().any(|r| r.ms_level == 2);
+    let has_ms1 = reader.idx_records().iter().any(|r| r.ms_level() == 1);
+    let has_ms2 = reader.idx_records().iter().any(|r| r.ms_level() == 2);
     assert!(has_ms1, "no MS1 scans found in Idx");
     assert!(has_ms2, "no MS2 scans found in Idx");
     println!(
         "MS1: {}, MS2: {}",
         reader
-            .idx_records
+            .idx_records()
             .iter()
-            .filter(|r| r.ms_level == 1)
+            .filter(|r| r.ms_level() == 1)
             .count(),
         reader
-            .idx_records
+            .idx_records()
             .iter()
-            .filter(|r| r.ms_level == 2)
+            .filter(|r| r.ms_level() == 2)
             .count()
     );
 }
@@ -160,10 +160,13 @@ fn test_iter_chromatograms_emits_tic() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let n_records = reader.idx_records.len();
+    let n_records = reader.idx_records().len();
     assert!(n_records > 0, "fixture should have Idx records");
 
-    let chroms: Vec<_> = reader.iter_chromatograms().collect();
+    let chroms: Vec<_> = reader
+        .iter_chromatograms()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_chromatograms yielded an error");
 
     // Exactly one TIC chromatogram: BPC/SRM need net-new decode work and are
     // intentionally out of scope (see Sigilweaver/OpenSXRaw#21).
@@ -189,7 +192,10 @@ fn test_ms1_has_peaks() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let ms1_with_peaks: Vec<_> = spectra
         .iter()
@@ -220,7 +226,10 @@ fn test_ms2_has_precursor() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let ms2: Vec<_> = spectra.iter().filter(|s| s.ms_level == 2).collect();
     assert!(!ms2.is_empty(), "expected at least one MS2 spectrum");
@@ -305,7 +314,10 @@ fn test_qtrap_fixture_gets_tqms_and_positive_polarity() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
     assert!(!spectra.is_empty());
     for s in &spectra {
         assert_eq!(s.analyzer, Some(Analyzer::TQMS));
@@ -318,7 +330,10 @@ fn test_calibrated_mz_is_physically_plausible() {
     let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let with_peaks: Vec<_> = spectra.iter().filter(|s| !s.mz.is_empty()).collect();
     assert!(
@@ -349,7 +364,10 @@ fn test_tripletof_fixture_gets_tofms_and_positive_polarity() {
     let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
     assert!(!spectra.is_empty());
     for s in &spectra {
         assert_eq!(s.analyzer, Some(Analyzer::TOFMS));

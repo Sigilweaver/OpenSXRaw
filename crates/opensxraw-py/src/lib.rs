@@ -16,6 +16,15 @@ fn to_py_err(e: ::opensxraw::Error) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
+fn core_to_py_err(e: openmassspec_core::Error) -> PyErr {
+    PyRuntimeError::new_err(e.to_string())
+}
+
+// The label functions below keep this module's established Python strings
+// for the variants they name. Core enums are `#[non_exhaustive]`; a variant
+// added later falls back to core's own stable `as_str` label rather than
+// being dropped.
+
 fn analyzer_str(a: Analyzer) -> &'static str {
     match a {
         Analyzer::ITMS => "itms",
@@ -24,6 +33,7 @@ fn analyzer_str(a: Analyzer) -> &'static str {
         Analyzer::TOFMS => "tofms",
         Analyzer::FTMS => "ftms",
         Analyzer::Sector => "sector",
+        other => other.as_str(),
     }
 }
 
@@ -40,6 +50,7 @@ fn activation_str(a: Activation) -> &'static str {
         Activation::UVPD => "uvpd",
         Activation::SID => "sid",
         Activation::EThcD => "ethcd",
+        other => other.as_str(),
     }
 }
 
@@ -47,6 +58,7 @@ fn polarity_str(p: Polarity) -> &'static str {
     match p {
         Polarity::Positive => "positive",
         Polarity::Negative => "negative",
+        other => other.as_str(),
     }
 }
 
@@ -54,6 +66,7 @@ fn scan_mode_str(m: ScanMode) -> &'static str {
     match m {
         ScanMode::Centroid => "centroid",
         ScanMode::Profile => "profile",
+        other => other.as_str(),
     }
 }
 
@@ -61,13 +74,14 @@ fn mobility_kind_str(k: MobilityArrayKind) -> &'static str {
     match k {
         MobilityArrayKind::InverseReducedVsPerCm2 => "inverse_reduced_k0",
         MobilityArrayKind::DriftTimeMilliseconds => "drift_time_ms",
+        other => other.as_str(),
     }
 }
 
 fn cv_term_dict<'py>(py: Python<'py>, term: &CvTerm) -> PyResult<Bound<'py, PyDict>> {
     let d = PyDict::new(py);
-    d.set_item("accession", term.accession)?;
-    d.set_item("name", &term.name)?;
+    d.set_item("accession", term.accession.as_ref())?;
+    d.set_item("name", term.name.as_ref())?;
     Ok(d)
 }
 
@@ -123,10 +137,11 @@ fn run_info_dict<'py>(py: Python<'py>, m: &RunMetadata) -> PyResult<Bound<'py, P
 
 fn chromatograms_to_py<'py>(
     py: Python<'py>,
-    records: impl IntoIterator<Item = ChromatogramRecord>,
+    records: impl IntoIterator<Item = openmassspec_core::Result<ChromatogramRecord>>,
 ) -> PyResult<Bound<'py, PyList>> {
     let out = PyList::empty(py);
     for c in records {
+        let c = c.map_err(core_to_py_err)?;
         let d = PyDict::new(py);
         d.set_item("index", c.index)?;
         d.set_item("id", c.id)?;
@@ -284,13 +299,18 @@ pub struct RawReader {
 }
 
 impl RawReader {
-    fn from_reader(path: &str, mut reader: Reader) -> Self {
-        let spectra = reader.iter_spectra().collect();
-        Self {
+    /// Decode every spectrum up front. The first scan that fails to decode
+    /// raises instead of being dropped.
+    fn from_reader(path: &str, mut reader: Reader) -> PyResult<Self> {
+        let spectra = reader
+            .iter_spectra()
+            .collect::<openmassspec_core::Result<Vec<_>>>()
+            .map_err(core_to_py_err)?;
+        Ok(Self {
             path: path.to_string(),
             reader,
             spectra,
-        }
+        })
     }
 }
 
@@ -298,10 +318,7 @@ impl RawReader {
 impl RawReader {
     #[new]
     fn new(path: &str) -> PyResult<Self> {
-        Ok(Self::from_reader(
-            path,
-            Reader::open(path).map_err(to_py_err)?,
-        ))
+        Self::from_reader(path, Reader::open(path).map_err(to_py_err)?)
     }
 
     #[getter]
@@ -323,20 +340,19 @@ impl RawReader {
 
     #[getter]
     fn sample_name(&self) -> &str {
-        &self.reader.sample
+        self.reader.sample()
     }
 
     /// Instrument identity decoded from the WIFF Log stream.
     fn instrument_info<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.reader
-            .instrument_info
-            .as_ref()
+            .instrument_info()
             .map(|info| {
                 let out = PyDict::new(py);
-                out.set_item("component_id", &info.component_id)?;
-                out.set_item("manufacturer", &info.manufacturer)?;
-                out.set_item("model_number", &info.model_number)?;
-                out.set_item("serial_number", &info.serial_number)?;
+                out.set_item("component_id", info.component_id())?;
+                out.set_item("manufacturer", info.manufacturer())?;
+                out.set_item("model_number", info.model_number())?;
+                out.set_item("serial_number", info.serial_number())?;
                 Ok(out)
             })
             .transpose()
@@ -345,11 +361,11 @@ impl RawReader {
     /// TOF m/z calibration coefficients, when present.
     fn calibration<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.reader
-            .calibration
+            .calibration()
             .map(|cal| {
                 let out = PyDict::new(py);
-                out.set_item("slope", cal.slope)?;
-                out.set_item("intercept", cal.intercept)?;
+                out.set_item("slope", cal.slope())?;
+                out.set_item("intercept", cal.intercept())?;
                 Ok(out)
             })
             .transpose()
@@ -358,8 +374,8 @@ impl RawReader {
     /// Named ion source parameters decoded from the selected method.
     fn ion_source_parameters<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let out = PyDict::new(py);
-        for param in &self.reader.ion_source_parameters {
-            out.set_item(&param.name, param.value)?;
+        for param in self.reader.ion_source_parameters() {
+            out.set_item(param.name(), param.value())?;
         }
         Ok(out)
     }
@@ -367,9 +383,9 @@ impl RawReader {
     /// Data-dependent precursor m/z values in their source stream order.
     fn dde_precursor_mz(&self) -> Vec<f64> {
         self.reader
-            .dde_records
+            .dde_records()
             .iter()
-            .map(|r| r.precursor_mz)
+            .map(|r| r.precursor_mz())
             .collect()
     }
 
@@ -380,13 +396,13 @@ impl RawReader {
     /// Decoded WIFF scan index values, including instrument-reported TIC.
     fn scan_index<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let out = PyList::empty(py);
-        for record in &self.reader.idx_records {
+        for record in self.reader.idx_records() {
             let d = PyDict::new(py);
-            d.set_item("scan_offset", record.scan_offset)?;
-            d.set_item("scan_size", record.scan_size)?;
-            d.set_item("retention_time_min", record.retention_time_min)?;
-            d.set_item("ms_level", record.ms_level)?;
-            d.set_item("tic", record.tic)?;
+            d.set_item("scan_offset", record.scan_offset())?;
+            d.set_item("scan_size", record.scan_size())?;
+            d.set_item("retention_time_min", record.retention_time_min())?;
+            d.set_item("ms_level", record.ms_level())?;
+            d.set_item("tic", record.tic())?;
             out.append(d)?;
         }
         Ok(out)
@@ -457,6 +473,15 @@ fn iter_spectra(
         match opened {
             Ok(mut reader) => {
                 for rec in reader.iter_spectra() {
+                    // A scan that fails to decode ends the stream with an
+                    // error raised from `__next__`, not a silent skip.
+                    let rec = match rec {
+                        Ok(rec) => rec,
+                        Err(e) => {
+                            let _ = tx.send(StreamMsg::Done(Err(e.to_string())));
+                            return;
+                        }
+                    };
                     if tx.send(StreamMsg::Record(Box::new(rec))).is_err() {
                         return;
                     }
@@ -485,10 +510,7 @@ fn list_samples(path: &str) -> PyResult<Vec<String>> {
 
 #[pyfunction]
 fn open_sample(path: &str, sample: &str) -> PyResult<RawReader> {
-    Ok(RawReader::from_reader(
-        path,
-        Reader::open_sample(path, sample).map_err(to_py_err)?,
-    ))
+    RawReader::from_reader(path, Reader::open_sample(path, sample).map_err(to_py_err)?)
 }
 
 #[pymodule]

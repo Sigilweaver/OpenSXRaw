@@ -196,7 +196,7 @@ fn filetime_to_rfc3339(filetime: u64) -> String {
 /// - `[0..4]`: `VARTYPE` (`u32`).
 /// - `[4..]`: the value, typed per `VARTYPE`. For `VT_FILETIME`, this is an
 ///   8-byte little-endian `FILETIME`.
-pub fn parse_create_timestamp(data: &[u8]) -> Option<String> {
+pub(crate) fn parse_create_timestamp(data: &[u8]) -> Option<String> {
     if read_u16(data, 0)? != PROPERTYSETSTREAM_BYTE_ORDER {
         return None;
     }

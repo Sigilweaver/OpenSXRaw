@@ -53,19 +53,29 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 
-pub const CALIBRATION_STREAM_HEADER: usize = 32;
+pub(crate) const CALIBRATION_STREAM_HEADER: usize = 32;
 
 /// Per-file linear calibration constants read from `TOFCalibrationData`.
 #[derive(Debug, Clone, Copy)]
 pub struct Calibration {
-    pub slope: f64,
-    pub intercept: f64,
+    pub(crate) slope: f64,
+    pub(crate) intercept: f64,
 }
 
 impl Calibration {
+    /// Slope of the linear time-bin to m/z conversion.
+    pub fn slope(&self) -> f64 {
+        self.slope
+    }
+
+    /// Intercept of the linear time-bin to m/z conversion.
+    pub fn intercept(&self) -> f64 {
+        self.intercept
+    }
+
     /// Parse the first `(slope, intercept)` pair from a `TOFCalibrationData`
     /// stream. Returns `None` if the stream is too short to contain one.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub(crate) fn from_bytes(data: &[u8]) -> Option<Self> {
         let body = data.get(CALIBRATION_STREAM_HEADER..)?;
         if body.len() < 16 {
             return None;
