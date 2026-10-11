@@ -23,6 +23,11 @@ On TripleTOF/ZenoTOF files the raw time-bin values are converted to m/z
 (Da) using the first `(slope, intercept)` pair of the `TOFCalibrationData`
 stream. QTRAP files have no calibration body, so their `mz` values are
 raw, uncalibrated bin values.
+
+The resulting TripleTOF/ZenoTOF m/z values are not accurate: they do not
+line up with known fragment ions, background ions, or isotope spacing, and
+some files contain negative m/z. Do not use them for identification or
+accurate-mass work.
 :::
 
 ## MS level and precursor

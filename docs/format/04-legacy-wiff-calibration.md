@@ -1,6 +1,13 @@
 # Legacy .wiff m/z calibration and MS2 precursor m/z
 
-Status: CONFIRMED (TripleTOF/`ExperimentTOF` files), OUT OF SCOPE (QTRAP-only files)
+Status: STREAM LAYOUT DECODED, m/z NOT ACCURATE (TripleTOF/`ExperimentTOF` files), OUT OF SCOPE (QTRAP-only files)
+
+The `(slope, intercept)` pair below is read correctly, but m/z computed from
+it is not accurate. On the corpus, 33 of 48 sampled TOF files have negative
+m/z, and in 6 files checked in detail no peak lines up with known peptide
+fragment ions, common background ions, or 1.003 Da isotope spacing. The
+true transform is not known yet (likely not a single linear pair per
+file).
 
 This documents the two CFBF streams scoped by issue #3: `SampleSubtree/Sample1/TOFCalibrationData`
 (turns `raw_mz_bin` into physical m/z) and `SampleSubtree/Sample1/DDERealTimeDataEx`
@@ -105,9 +112,9 @@ What was confirmed:
   (well under 0.1 Da across a run in the files checked), the Rust
   implementation (`raw/experiment_tof.rs`) uses **only the first
   `(slope, intercept)` pair** as a per-file constant rather than
-  resolving the full live-recalibration table. This is a known,
-  documented approximation - within roughly the observed drift band of
-  the fully time-resolved value - not a silent inaccuracy.
+  resolving the full live-recalibration table. The resulting m/z values
+  fail the physical checks described in the status note at the top of
+  this page, so the error is far larger than the intercept drift.
 
 ## `TDCStatistics` - ruled out
 

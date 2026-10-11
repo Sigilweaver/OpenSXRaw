@@ -28,8 +28,9 @@ true time-of-flight, unlike TripleTOF.
 The reader uses the `TOFCalibrationData` stream. TripleTOF and ZenoTOF
 files carry a `(slope, intercept)` body there; QTRAP files carry only a
 header. When the body is present, spectra are reported with
-`Analyzer::TOFMS` and calibrated m/z; otherwise with `Analyzer::TQMS` and
-raw-bin m/z. Across the 200-file local corpus this signal agreed with the
+`Analyzer::TOFMS` and m/z from a per-file linear calibration (not
+accurate, see Known issues in the README); otherwise with `Analyzer::TQMS`
+and raw-bin m/z. Across the 200-file local corpus this signal agreed with the
 presence of `ExperimentTOF` method streams and with every embedded
 instrument-name hint. When the `Log` stream carries a self-identification
 record, `run_metadata().instrument` also names the specific model.

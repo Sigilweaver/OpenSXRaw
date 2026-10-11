@@ -36,12 +36,20 @@ public corpus of mass-spectrometry datasets (PRIDE accessions); see
 | TripleTOF instrument family                   | supported |
 | QTRAP instrument family                       | supported |
 | `.wiff2` container                            | not supported (encrypted, out of scope) - see [Format specification](./format/wiff2-container) |
-| m/z calibration (`TOFCalibrationData`)        | TripleTOF/ZenoTOF: calibrated; QTRAP: raw time-bin values |
+| m/z calibration (`TOFCalibrationData`)        | TripleTOF/ZenoTOF: one linear calibration per file, m/z not accurate; QTRAP: raw bin values, not m/z |
 | MS2 precursor m/z (`DDERealTimeDataEx`)        | decoded on DDA files (cycle-linked heuristic) |
 
 CI runs the conformance suite against a public QTRAP 6500+ fixture.
-TripleTOF files currently decode with every scan labelled MS2, including
-survey scans; see Known issues in the README.
+
+:::warning m/z is not reliable yet
+TripleTOF/ZenoTOF m/z values fail physical checks (known fragment ions,
+background ions, isotope spacing) and some are negative; QTRAP m/z values
+are raw detector bins. TripleTOF/ZenoTOF files also decode with every scan
+labelled MS2, including survey scans. Do not use OpenSXRaw m/z values for
+identification or accurate-mass work. See
+[Known issues and gaps](https://github.com/Sigilweaver/OpenSXRaw#known-issues-and-gaps)
+in the README.
+:::
 
 ## Next steps
 
