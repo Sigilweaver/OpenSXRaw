@@ -35,27 +35,60 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 
-pub const IDX_STREAM_HEADER: usize = 32;
-pub const IDX_RECORD_SIZE: usize = 54;
+pub(crate) const IDX_STREAM_HEADER: usize = 32;
+pub(crate) const IDX_RECORD_SIZE: usize = 54;
 
 /// One decoded record from the Idx stream.
 #[derive(Debug, Clone)]
 pub struct IdxRecord {
     /// Byte offset of the scan block in the `.wiff.scan` file.
-    pub scan_offset: u32,
+    pub(crate) scan_offset: u32,
     /// Byte size of the scan block in the `.wiff.scan` file.
-    pub scan_size: u32,
+    pub(crate) scan_size: u32,
     /// Retention time in minutes.
-    pub retention_time_min: f32,
-    /// MS level: 1 for MS1, 2 for MS2 (derived from flag byte: 1 -> 1, 0 -> 2).
-    pub ms_level: u32,
+    pub(crate) retention_time_min: f32,
+    /// MS level the reader assigns to this scan. Set from the flag byte at
+    /// 0x10 (1 -> 1, anything else -> 2) when the record is parsed. Kept as a
+    /// separate field, not recomputed from the flag, so the reader can
+    /// assign it from other context after parsing.
+    pub(crate) ms_level: u32,
     /// Total Ion Current from the Idx record (in cps, not directly comparable
     /// to sum of raw intensity tokens).
-    pub tic: f64,
+    pub(crate) tic: f64,
     /// Secondary float64 field at 0x1A. Physical meaning is not fully resolved;
     /// it is related to the scan's time-bin grid spacing but is not a simple
-    /// 1:1 mapping. Not exposed in SpectrumRecord.
-    pub _field_1a: f64,
+    /// 1:1 mapping. Not exposed in the public API.
+    pub(crate) _field_1a: f64,
+}
+
+impl IdxRecord {
+    /// Byte offset of the scan block in the `.wiff.scan` file.
+    pub fn scan_offset(&self) -> u32 {
+        self.scan_offset
+    }
+
+    /// Byte size of the scan block in the `.wiff.scan` file.
+    pub fn scan_size(&self) -> u32 {
+        self.scan_size
+    }
+
+    /// Retention time in minutes.
+    pub fn retention_time_min(&self) -> f32 {
+        self.retention_time_min
+    }
+
+    /// MS level the reader assigns to this scan; the same value as the
+    /// `ms_level` of the matching `SpectrumRecord`. See the crate README's
+    /// known issues for files where this is wrong.
+    pub fn ms_level(&self) -> u32 {
+        self.ms_level
+    }
+
+    /// Total ion current recorded in the index, in counts per second. Not
+    /// directly comparable to the sum of the decoded raw intensities.
+    pub fn tic(&self) -> f64 {
+        self.tic
+    }
 }
 
 impl IdxRecord {
@@ -63,7 +96,7 @@ impl IdxRecord {
     ///
     /// Returns `None` if the record is a placeholder (scan_offset == 0 and
     /// scan_size == 0 - these exist in the stream but point to no real data).
-    pub fn from_bytes(buf: &[u8]) -> Option<Self> {
+    pub(crate) fn from_bytes(buf: &[u8]) -> Option<Self> {
         debug_assert_eq!(buf.len(), IDX_RECORD_SIZE);
         let scan_offset = LittleEndian::read_u32(&buf[0x00..0x04]);
         let scan_size = LittleEndian::read_u32(&buf[0x04..0x08]);
@@ -91,7 +124,7 @@ impl IdxRecord {
     }
 
     /// Parse the entire Idx stream bytes into a list of valid scan records.
-    pub fn parse_stream(data: &[u8]) -> crate::Result<Vec<IdxRecord>> {
+    pub(crate) fn parse_stream(data: &[u8]) -> crate::Result<Vec<IdxRecord>> {
         if data.len() < IDX_STREAM_HEADER {
             return Err(crate::Error::Parse(
                 "Idx stream too short for header".into(),

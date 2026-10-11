@@ -10,8 +10,8 @@
 //! `test_calibrated_mz_is_physically_plausible` below uses a different,
 //! TripleTOF fixture for the calibrated-m/z path.
 
-use openmassspec_core::conformance::assert_source_invariants;
-use openmassspec_core::{Analyzer, Polarity, SpectrumSource};
+use openmassspec_core::conformance::assert_iter_invariants;
+use openmassspec_core::{Analyzer, Polarity, SpectrumRecord, SpectrumSource};
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
 
@@ -115,27 +115,27 @@ fn test_opens_and_reads_idx() {
         return;
     };
     assert!(
-        !reader.idx_records.is_empty(),
+        !reader.idx_records().is_empty(),
         "expected at least one valid Idx record"
     );
-    println!("Idx records: {}", reader.idx_records.len());
+    println!("Idx records: {}", reader.idx_records().len());
 
     // Verify both MS1 and MS2 scans are present.
-    let has_ms1 = reader.idx_records.iter().any(|r| r.ms_level == 1);
-    let has_ms2 = reader.idx_records.iter().any(|r| r.ms_level == 2);
+    let has_ms1 = reader.idx_records().iter().any(|r| r.ms_level() == 1);
+    let has_ms2 = reader.idx_records().iter().any(|r| r.ms_level() == 2);
     assert!(has_ms1, "no MS1 scans found in Idx");
     assert!(has_ms2, "no MS2 scans found in Idx");
     println!(
         "MS1: {}, MS2: {}",
         reader
-            .idx_records
+            .idx_records()
             .iter()
-            .filter(|r| r.ms_level == 1)
+            .filter(|r| r.ms_level() == 1)
             .count(),
         reader
-            .idx_records
+            .idx_records()
             .iter()
-            .filter(|r| r.ms_level == 2)
+            .filter(|r| r.ms_level() == 2)
             .count()
     );
 }
@@ -145,7 +145,43 @@ fn test_conformance_invariants() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let n = assert_source_invariants(&mut reader).expect("conformance invariants failed");
+    let spectra: Vec<SpectrumRecord> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
+    for (i, s) in spectra.iter().enumerate() {
+        assert_eq!(s.index, i, "spectrum {} out of sequence", s.native_id);
+    }
+
+    // MS2 scans acquired before the first MS1 survey scan have no known
+    // parent scan and no DDE precursor m/z, so their precursor is present
+    // but empty, which the shared suite's precursor invariant rejects.
+    // Check those explicitly, then run the shared suite on the rest
+    // (renumbered from 0; the raw sequence is checked above).
+    let leading = spectra
+        .iter()
+        .position(|s| s.ms_level == 1)
+        .unwrap_or(spectra.len());
+    for s in &spectra[..leading] {
+        let p = s
+            .precursor
+            .as_ref()
+            .unwrap_or_else(|| panic!("MS2 spectrum {} has no precursor", s.native_id));
+        assert!(
+            p.precursor_native_id.is_none(),
+            "{} precedes every MS1 scan but has a precursor ref",
+            s.native_id
+        );
+    }
+    assert!(
+        leading <= 1,
+        "expected at most one MS2 scan before the first MS1, got {leading}"
+    );
+    let n = assert_iter_invariants(spectra.into_iter().skip(leading).map(|mut s| {
+        s.index -= leading;
+        s
+    }))
+    .expect("conformance invariants failed");
     assert!(n > 0, "expected at least one spectrum");
     assert_eq!(reader.scan_read_failures(), 0, "scan block reads failed");
     assert_eq!(
@@ -160,10 +196,13 @@ fn test_iter_chromatograms_emits_tic() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let n_records = reader.idx_records.len();
+    let n_records = reader.idx_records().len();
     assert!(n_records > 0, "fixture should have Idx records");
 
-    let chroms: Vec<_> = reader.iter_chromatograms().collect();
+    let chroms: Vec<_> = reader
+        .iter_chromatograms()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_chromatograms yielded an error");
 
     // Exactly one TIC chromatogram: BPC/SRM need net-new decode work and are
     // intentionally out of scope (see Sigilweaver/OpenSXRaw#21).
@@ -189,7 +228,10 @@ fn test_ms1_has_peaks() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let ms1_with_peaks: Vec<_> = spectra
         .iter()
@@ -220,27 +262,36 @@ fn test_ms2_has_precursor() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let ms2: Vec<_> = spectra.iter().filter(|s| s.ms_level == 2).collect();
     assert!(!ms2.is_empty(), "expected at least one MS2 spectrum");
 
-    let first_ms1_index = spectra.iter().position(|s| s.ms_level == 1);
+    // Every precursor reference is the exact native ID of the most recent
+    // MS1 spectrum; an MS2 with no preceding MS1 has no reference.
+    let mut last_ms1: Option<&str> = None;
+    let mut with_ref = 0;
     let mut with_selected_mz = 0;
-    for s in &ms2 {
+    for s in &spectra {
+        if s.ms_level == 1 {
+            last_ms1 = Some(s.native_id.as_str());
+            continue;
+        }
         let precursor = s
             .precursor
             .as_ref()
             .unwrap_or_else(|| panic!("MS2 spectrum {} has no precursor", s.native_id));
-        assert!(
-            precursor.precursor_native_id.is_some(),
-            "MS2 spectrum {} has no precursor_native_id",
+        assert_eq!(
+            precursor.precursor_native_id.as_deref(),
+            last_ms1,
+            "MS2 spectrum {} precursor ref",
             s.native_id
         );
-        // Every MS2 after the first MS1 survey scan references a real scan.
-        if first_ms1_index.is_some_and(|i| i < s.index) {
-            let id = precursor.precursor_native_id.as_deref().unwrap_or("");
-            assert!(id.starts_with("scan="), "unexpected precursor id {id}");
+        if precursor.precursor_native_id.is_some() {
+            with_ref += 1;
         }
         assert!(
             s.native_id.starts_with("scan="),
@@ -255,7 +306,7 @@ fn test_ms2_has_precursor() {
     // DDERealTimeDataEx's cycle-based linkage (see `raw::dde`) resolves for
     // every MS2 scan except ones before the file's first MS1 survey scan -
     // a rare edge case, not the common case. Require the large majority to
-    // have a real precursor m/z rather than the "ms1ref=unknown" fallback.
+    // have a real precursor m/z.
     let fraction_with_mz = with_selected_mz as f64 / ms2.len() as f64;
     assert!(
         fraction_with_mz > 0.9,
@@ -266,10 +317,11 @@ fn test_ms2_has_precursor() {
     );
 
     println!(
-        "First MS2: native_id={}, {}/{} MS2 spectra have precursor selected_mz",
+        "First MS2: native_id={}, {}/{} MS2 spectra have precursor selected_mz, {} a spectrumRef",
         ms2[0].native_id,
         with_selected_mz,
-        ms2.len()
+        ms2.len(),
+        with_ref
     );
 }
 
@@ -305,7 +357,10 @@ fn test_qtrap_fixture_gets_tqms_and_positive_polarity() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
     assert!(!spectra.is_empty());
     for s in &spectra {
         assert_eq!(s.analyzer, Some(Analyzer::TQMS));
@@ -318,7 +373,10 @@ fn test_calibrated_mz_is_physically_plausible() {
     let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
 
     let with_peaks: Vec<_> = spectra.iter().filter(|s| !s.mz.is_empty()).collect();
     assert!(
@@ -349,7 +407,10 @@ fn test_tripletof_fixture_gets_tofms_and_positive_polarity() {
     let Some(mut reader) = calibrated_fixture_or_skip() else {
         return;
     };
-    let spectra: Vec<_> = reader.iter_spectra().collect();
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
     assert!(!spectra.is_empty());
     for s in &spectra {
         assert_eq!(s.analyzer, Some(Analyzer::TOFMS));

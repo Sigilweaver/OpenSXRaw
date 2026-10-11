@@ -33,17 +33,22 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 
-pub const DDE_STREAM_HEADER: usize = 32;
-pub const DDE_RECORD_SIZE: usize = 76;
+pub(crate) const DDE_STREAM_HEADER: usize = 32;
+pub(crate) const DDE_RECORD_SIZE: usize = 76;
 
 /// One decoded record from the `DDERealTimeDataEx` stream.
 #[derive(Debug, Clone, Copy)]
 pub struct DdeRecord {
     /// Precursor m/z, already physically calibrated.
-    pub precursor_mz: f64,
+    pub(crate) precursor_mz: f64,
 }
 
 impl DdeRecord {
+    /// Precursor m/z, already physically calibrated.
+    pub fn precursor_mz(&self) -> f64 {
+        self.precursor_mz
+    }
+
     fn from_bytes(buf: &[u8]) -> Self {
         debug_assert_eq!(buf.len(), DDE_RECORD_SIZE);
         let precursor_mz = LittleEndian::read_f64(&buf[0x04..0x0c]);
@@ -52,7 +57,7 @@ impl DdeRecord {
 
     /// Parse the entire `DDERealTimeDataEx` stream bytes into a list of
     /// records, in stream order.
-    pub fn parse_stream(data: &[u8]) -> Vec<DdeRecord> {
+    pub(crate) fn parse_stream(data: &[u8]) -> Vec<DdeRecord> {
         let body = match data.get(DDE_STREAM_HEADER..) {
             Some(b) => b,
             None => return Vec::new(),

@@ -105,14 +105,37 @@ pub struct InstrumentInfo {
     /// Kept verbatim (including whatever spacing/casing quirk the firmware
     /// used) - normalization only happens for CV term resolution, in
     /// `resolve_cv_term`.
-    pub component_id: String,
+    pub(crate) component_id: String,
     /// Self-reported manufacturer string, e.g. `"AB Sciex Instruments"`.
-    pub manufacturer: Option<String>,
+    pub(crate) manufacturer: Option<String>,
     /// Self-reported catalog/part number, e.g. `"5021500/T"`. This is not
     /// the instrument serial number - see `serial_number`.
-    pub model_number: Option<String>,
+    pub(crate) model_number: Option<String>,
     /// Self-reported instrument serial number, e.g. `"BR20271408PL"`.
-    pub serial_number: Option<String>,
+    pub(crate) serial_number: Option<String>,
+}
+
+impl InstrumentInfo {
+    /// The instrument's self-reported `Component ID` value, verbatim, e.g.
+    /// `"TripleTOF 6600"` or `"QTRAP 5500"`.
+    pub fn component_id(&self) -> &str {
+        &self.component_id
+    }
+
+    /// Self-reported manufacturer string.
+    pub fn manufacturer(&self) -> Option<&str> {
+        self.manufacturer.as_deref()
+    }
+
+    /// Self-reported catalog/part number. Not the serial number.
+    pub fn model_number(&self) -> Option<&str> {
+        self.model_number.as_deref()
+    }
+
+    /// Self-reported instrument serial number.
+    pub fn serial_number(&self) -> Option<&str> {
+        self.serial_number.as_deref()
+    }
 }
 
 /// Decode a byte buffer as UTF-16LE, lossily. `.wiff` streams are written by
@@ -173,7 +196,7 @@ fn extract_field(window: &str, key: &str) -> Option<String> {
 /// Returns `None` if the stream doesn't contain a matching record - callers
 /// treat that as "not resolved" the same way as any other optional field
 /// here, not as an error.
-pub fn parse_instrument_info(data: &[u8]) -> Option<InstrumentInfo> {
+pub(crate) fn parse_instrument_info(data: &[u8]) -> Option<InstrumentInfo> {
     const TAG: &str = "Mass Spectrometer:";
     let text = decode_utf16_lossy(data);
 
@@ -249,7 +272,7 @@ fn normalize(component_id: &str) -> String {
 /// corpus (see `KNOWN_MODELS`). Callers should fall back to the generic
 /// `MS:1000121` ("SCIEX instrument model") term on `None` rather than
 /// fabricating a specific one.
-pub fn resolve_cv_term(component_id: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn resolve_cv_term(component_id: &str) -> Option<(&'static str, &'static str)> {
     let key = normalize(component_id);
     KNOWN_MODELS
         .iter()

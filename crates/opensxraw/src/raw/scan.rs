@@ -56,9 +56,9 @@ use byteorder::{ByteOrder, LittleEndian};
 /// `raw_mz_bin` is the accumulated integer time-bin index. `raw_intensity`
 /// is the raw ADC/TDC count value.
 #[derive(Debug, Clone, Copy)]
-pub struct ScanPoint {
-    pub raw_mz_bin: u32,
-    pub raw_intensity: u32,
+pub(crate) struct ScanPoint {
+    pub(crate) raw_mz_bin: u32,
+    pub(crate) raw_intensity: u32,
 }
 
 /// Decode the token-stream payload for one scan block.
@@ -66,7 +66,7 @@ pub struct ScanPoint {
 /// `payload` is the raw bytes starting at `scan_offset + 56` up to (but not
 /// including) the `ff ff ff ff` terminator. The terminator should have been
 /// found before calling this function; if not, decoding stops at end-of-slice.
-pub fn decode_payload(payload: &[u8]) -> Vec<ScanPoint> {
+pub(crate) fn decode_payload(payload: &[u8]) -> Vec<ScanPoint> {
     let mut points = Vec::new();
     let mut mz_bin: u32 = 0;
     let mut i = 0usize;
@@ -176,13 +176,13 @@ const MAX_BLOCK_READ_LEN: u64 = 64 * 1024 * 1024; // 64 MiB
 ///
 /// Returns the decoded scan points, an empty vec if the block lies outside
 /// the file, or an error if the file cannot be opened or read.
-pub fn read_scan_block(
+pub(crate) fn read_scan_block(
     scan_path: &std::path::Path,
     scan_offset: u64,
     scan_size: u64,
     next_scan_offset: u64,
     scan_file_size: u64,
-) -> crate::Result<Vec<ScanPoint>> {
+) -> std::io::Result<Vec<ScanPoint>> {
     use std::io::{Read, Seek, SeekFrom};
 
     let payload_start = scan_offset + 56;

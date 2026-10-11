@@ -47,3 +47,21 @@ def test_decoded_fields():
         reader.read_spectrum(reader.scan_count)
     for chrom in reader.read_chromatograms():
         assert len(chrom["time_sec"]) == len(chrom["intensity"])
+
+
+def test_unreadable_scan_blocks_raise(tmp_path):
+    path = _fixture_path()
+    if not path.is_file():
+        if os.environ.get("REQUIRE_CORPUS") == "1":
+            pytest.fail(f"REQUIRE_CORPUS=1 but {path} is missing")
+        pytest.skip("set OPENSXRAW_CORPUS or OPENSXRAW_TEST_WIFF to a WIFF fixture")
+    # Pair the real .wiff with an empty .wiff.scan: every scan block lies
+    # past the end of the file, so decoding must raise, not return empty
+    # spectra.
+    wiff = tmp_path / path.name
+    wiff.write_bytes(path.read_bytes())
+    (tmp_path / (path.name + ".scan")).write_bytes(b"")
+    with pytest.raises(RuntimeError, match="past the end"):
+        opensxraw.RawReader(str(wiff))
+    with pytest.raises(RuntimeError, match="past the end"):
+        next(opensxraw.iter_spectra(str(wiff)))

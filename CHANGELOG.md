@@ -7,8 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- Adopts `openmassspec-core` 3.0. `Reader::iter_spectra` and
+  `Reader::iter_chromatograms` yield `openmassspec_core::Result` items
+  (`SpectrumIter` / `ChromatogramIter`). Callers add `?` or collect into a
+  `Result`.
+- A scan block that cannot be read from the `.wiff.scan` file (I/O error,
+  or a block that starts past the end of the file) is yielded as an `Err`
+  item wrapping the new `Error::ScanRead { scan_number, offset, source }`
+  variant. Iteration continues with the next scan. Such scans were
+  previously yielded as empty spectra, so mzML writing now stops at the
+  first unreadable scan unless the caller opts into the core writer's
+  skip policy.
+- `opensxraw::Error` is `#[non_exhaustive]`, and so is its new `ScanRead`
+  variant. `From<opensxraw::Error> for openmassspec_core::Error` is
+  implemented.
+- `Reader` fields are private. Use the accessor methods instead:
+  `stem()`, `sample()`, `idx_records()`, `start_timestamp()`,
+  `instrument_info()`, `calibration()`, `dde_records()`,
+  `ion_source_parameters()`, `polarity()`. `instrument_info()` and
+  `calibration()` return `Option<&T>`; the slice and string accessors
+  return borrows.
+- The `raw` module is private. Its data types are re-exported at the crate
+  root with private fields and accessor methods:
+  - `IdxRecord`: `scan_offset()`, `scan_size()`, `retention_time_min()`,
+    `ms_level()`, `tic()`. The undocumented `_field_1a` field is no longer
+    exposed.
+  - `Calibration`: `slope()`, `intercept()`; `apply()` is unchanged.
+  - `DdeRecord`: `precursor_mz()`.
+  - `InstrumentInfo`: `component_id()`, `manufacturer()`,
+    `model_number()`, `serial_number()` (borrowed `&str`).
+  - `SourceParameter`: `name()`, `value()`.
+- Removed from the public API (now crate-private): the low-level parsers
+  `raw::idx::IdxRecord::{from_bytes, parse_stream}`,
+  `raw::dde::DdeRecord::parse_stream`, `raw::calibration::Calibration::from_bytes`,
+  `raw::ion_source::SourceParameter::from_bytes`,
+  `raw::instrument_log::{parse_instrument_info, resolve_cv_term}`,
+  `raw::scan::{decode_payload, read_scan_block, ScanPoint}`,
+  `raw::summary_info::parse_create_timestamp`, and the constants
+  `IDX_STREAM_HEADER`, `IDX_RECORD_SIZE`, `DDE_STREAM_HEADER`,
+  `DDE_RECORD_SIZE`, `CALIBRATION_STREAM_HEADER`, `ION_SPRAY_VOLTAGE_NAMES`.
+- The `opensxraw.scan_read_error` spectrum `extra` key is no longer
+  written; the error is the `Err` item.
+- Python: `RawReader(path)` and `open_sample(path, sample)` raise
+  `RuntimeError` when any scan fails to decode, and `iter_spectra` raises
+  from the step that reaches the failing scan, instead of returning empty
+  spectra. `read_chromatograms` raises on a chromatogram error. Returned
+  values and labels are otherwise unchanged.
+
 ### Changed
 
+- mzML written through `openmassspec-core` 3.0 names PSI-MS CV release
+  4.2.4 in its `<cv>` entry, and MS2 precursors no longer carry a default
+  `collision-induced dissociation` activation term, because this reader
+  does not decode the activation method.
 - Spectrum native IDs are now `scan=N` (was `file=<stem> scan=N`), and
   `RunMetadata.native_id_format` is `MS:1000776` "scan number only nativeID
   format". The previous `MS:1000823` is the Bruker U2 nativeID format and
@@ -36,18 +89,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `ff ff ff ff` byte run inside a multi-byte intensity value (for
   example `fd ff ff` followed by an `ff` prefix) no longer cuts the
   payload short; the terminator is only recognized on a token boundary.
-- `.wiff.scan` I/O errors during `iter_spectra` are no longer silently
-  turned into empty spectra: each is logged (`log` crate, `warn`),
-  recorded under `opensxraw.scan_read_error` in the spectrum's `extra`,
-  and counted by the new `Reader::scan_read_failures()`.
-- A scan block that starts past the end of the `.wiff.scan` file is
-  reported the same way instead of yielding a silently empty spectrum.
+- `.wiff.scan` I/O errors during `iter_spectra`, and scan blocks that
+  start past the end of the `.wiff.scan` file, are no longer silently
+  turned into empty spectra: each is an `Err` item (see Breaking) and is
+  counted by the new `Reader::scan_read_failures()`.
 - Read errors on optional `.wiff` streams (`SummaryInformation`, `Log`,
   `TOFCalibrationData`, `DDERealTimeDataEx`, ion source parameters) are
   logged at `warn` instead of ignored; a `DDERealTimeDataEx` read error no
   longer parses a partial buffer.
 - Guide pages no longer claim m/z is uncalibrated, precursors are not
   decoded, or every spectrum is TOFMS.
+- An MS2 spectrum with no preceding MS1 scan now has
+  `precursor_native_id = None` instead of the placeholder
+  `"file=<stem> ms1ref=unknown"`, which named no spectrum and made mzML
+  output fail schema validation (dangling `spectrumRef`). In files with
+  no MS1 scans this affected every MS2 spectrum.
 
 ## [0.3.0] - 2026-09-28
 

@@ -18,9 +18,8 @@ Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxra
 
 ## Known issues and gaps
 
-These apply to the published releases (opensxraw 0.3.0 and earlier) and to
-current `main`. Figures come from checks run on the public validation
-corpus (see [CORPUS.md](CORPUS.md)).
+These apply to opensxraw 0.4.0 and all earlier releases. Figures come from
+checks run on the public validation corpus (see [CORPUS.md](CORPUS.md)).
 
 - **m/z values are not reliable on any instrument family.** No part of the
   m/z axis has been validated against a physical reference. Do not use
@@ -103,6 +102,7 @@ use openmassspec_core::SpectrumSource;
 
 let mut reader = Reader::open("sample.wiff")?;
 for spectrum in reader.iter_spectra() {
+    let spectrum = spectrum?;
     println!("{}: {} peaks", spectrum.native_id, spectrum.mz.len());
 }
 ```
