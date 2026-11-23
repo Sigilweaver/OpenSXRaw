@@ -21,7 +21,7 @@ abstract: >
 license: "Apache-2.0"
 license-url: "https://github.com/Sigilweaver/OpenSXRaw/blob/main/LICENSE"
 date-released: "2026-10-11"
-version: "0.4.0"
+version: "0.5.0"
 keywords:
   - mass spectrometry
   - proteomics
