@@ -15,8 +15,22 @@ use openmassspec_core::write_mzml;
 
 let mut reader = Reader::open("sample.wiff")?;
 let mut out = std::fs::File::create("output.mzML")?;
-let summary = write_mzml(&mut reader, &mut out)?;
+let summary = write_mzml(&mut reader, &mut out)?; // fails: unknown_scan_mode
 println!("{} spectra written", summary.spectra_written);
+```
+
+The reader cannot tell centroid from profile data, so every spectrum has
+`scan_mode` unknown and the default `write_mzml` stops at the first
+spectrum with the `unknown_scan_mode` check. To write the file, allow that
+check, which marks each spectrum with an `unknown_scan_mode` warning and
+leaves the profile/centroid term out of the mzML:
+
+```rust
+use openmassspec_core::{write_mzml_with_options, Check, Leniency, WriteOptions};
+
+let options = WriteOptions::new()
+    .with_leniency(Leniency::strict().with(Check::UnknownScanMode));
+let summary = write_mzml_with_options(&mut reader, &mut out, &options)?;
 ```
 
 `write_mzml` stops at the first spectrum that fails to decode and returns

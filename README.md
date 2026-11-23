@@ -18,7 +18,7 @@ Documentation: [sigilweaver.app/opensxraw/docs](https://sigilweaver.app/opensxra
 
 ## Known issues and gaps
 
-These apply to opensxraw 0.4.0 and all earlier releases. Figures come from
+These apply to opensxraw 0.5.0 and all earlier releases. Figures come from
 checks run on the public validation corpus (see [CORPUS.md](CORPUS.md)).
 
 - **m/z values are not reliable on any instrument family.** No part of the
@@ -45,13 +45,29 @@ checks run on the public validation corpus (see [CORPUS.md](CORPUS.md)).
 - **MRM transitions are not reported.** QTRAP MRM spectra do not expose
   their Q1/Q3 transitions, and no SRM chromatograms are produced. Only a
   TIC chromatogram is available.
+- **mzML conversion fails by default.** No decoded stream says whether a
+  scan is centroid or profile, so every spectrum has `scan_mode` unknown.
+  `openmassspec-core` 4 refuses an unknown scan mode (check
+  `unknown_scan_mode`), so a default conversion stops at the first spectrum
+  in every file of the public corpus (QTRAP DDA, QTRAP MRM, TripleTOF and
+  SWATH alike). To convert anyway, allow the check: `--allow
+  unknown_scan_mode` on the `openmassspec` command line,
+  `Leniency::strict().with(Check::UnknownScanMode)` in Rust. The mzML then
+  has no profile or centroid term on its spectra, and each is marked with an
+  `unknown_scan_mode` warning.
+- **Collision energy and activation are not decoded.** `collision_energies`
+  is empty and `activation` is `None` on every precursor (issue #23). Some
+  methods store a collision energy per Experiment in the method tree, but no
+  decoded stream links a scan to its Experiment (issue #7) and the file
+  states no unit, so none is reported. No collision-energy unit check can
+  fire because no energy is reported.
 - **`.wiff2` is not supported.** The format is encrypted. The reader
   currently rejects these files with "Invalid CFB file (wrong magic
   number)" rather than a message naming `.wiff2`.
 - **Multi-sample `.wiff` files** must be opened with `Reader::open_sample`
   (Python: `opensxraw.open_sample`); `Reader::open` returns an error.
 - **Not reported or untested:** centroid/profile mode (`scan_mode` is
-  always `None`); negative polarity (handled in code, but no negative-mode
+  always unknown); negative polarity (handled in code, but no negative-mode
   file is in the corpus).
 
 What has been checked and holds: the `.wiff` container and `Idx` scan

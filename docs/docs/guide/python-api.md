@@ -46,7 +46,18 @@ for i in range(reader.scan_count):
 | `mz`                  | `list[float]` | m/z values (float64)                 |
 | `intensity`           | `list[float]` | Intensities (float32)                |
 | `ms_level`            | `int`         | MS level (1 for MS1, 2+ for MS/MS)   |
-| `retention_time_sec`  | `float`       | Retention time in seconds            |
+| `retention_time_sec`  | `float \| None` | Retention time in seconds (always set by this reader) |
+| `polarity`            | `str \| None` | `"positive"` or `"negative"`          |
+| `analyzer`            | `str \| None` | `"tqms"` (QTRAP) or `"tof"` (TripleTOF, ZenoTOF) |
+| `scan_mode`           | `str \| None` | Always `None`: the file does not say |
+| `precursor`           | `dict \| None` | MS2+ only, see below                 |
+
+`precursor` has the keys `target_mz`, `selected_mz`, `isolation_width`,
+`charge`, `intensity`, `collision_energies`, `precursor_native_id`,
+`activation`, `analyzer` and `ccs`. `collision_energies` is a list of
+`{"value": float, "unit": "ev" | "nce" | None}` dicts; it is empty
+because the file's scan data carries no collision energy. Labels are
+Core's `as_str` labels.
 
 `len(spectrum)` returns the peak count. m/z on TripleTOF/ZenoTOF files
 comes from a per-file linear calibration and is not accurate; on QTRAP

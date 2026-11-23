@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Python: the minimum version is 3.10 (`requires-python = ">=3.10"`, one abi3
+  wheel per platform built for 3.10, see
+  [SUPPORT.md](https://github.com/Sigilweaver/ops/blob/main/SUPPORT.md)).
+- Adopts `openmassspec-core` 4.0. Rust callers see Core's changes in the types
+  this crate returns: `SpectrumRecord::retention_time_sec` is
+  `Option<f64>` (this reader always sets it), and
+  `PrecursorInfo::collision_energy` and `ce_is_nce` are replaced by the
+  `collision_energies` list (always empty here, see Known issues).
+  Migration notes:
+  [MIGRATING-4.0.md](https://github.com/Sigilweaver/OpenMassSpecCore/blob/main/MIGRATING-4.0.md)
+  in OpenMassSpecCore.
+- Python: `Spectrum.precursor` has a `collision_energies` list of
+  `{"value", "unit"}` dicts in place of the `collision_energy` and
+  `ce_is_nce` keys. The list is empty because the file's scan data carries no
+  collision energy.
+- Python: `Spectrum.retention_time_sec` is `float | None`.
+- Python: enum labels come from Core's `as_str`. The only label that
+  differs from 0.4.0 is `analyzer` `"tofms"`, now `"tof"`; it appears on
+  `Spectrum.analyzer`, `precursor["analyzer"]` and `run_info()["analyzers"]`.
+- Writing mzML from this reader with default options now fails with check
+  `unknown_scan_mode`: the reader cannot tell centroid from profile data, so
+  `scan_mode` is unknown on every spectrum, and Core 4 rejects an unknown scan
+  mode instead of writing it as profile. Allow the check to write the file
+  (see Known issues in the README).
+
 ## [0.4.0] - 2026-10-11
 
 ### Breaking
