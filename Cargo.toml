@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/opensxraw", "crates/opensxraw-py"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Nathan Riley <git@nathanriley.com>"]
@@ -16,9 +16,14 @@ categories = ["parser-implementations", "science"]
 
 [workspace.dependencies]
 opensxraw = { path = "crates/opensxraw" }
-openmassspec-core = "3.0.0"
-pyo3 = { version = "0.30", features = ["extension-module"] }
+openmassspec-core = "4.0.0"
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py310"] }
 thiserror = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Pinned to a Core commit until openmassspec-core 4.0.0 is on crates.io. Remove
+# this section when it is.
+[patch.crates-io]
+openmassspec-core = { git = "https://github.com/Sigilweaver/OpenMassSpecCore", rev = "63b2a3010abea9d2bfd7a74c9e9a413b6a1ade39" }

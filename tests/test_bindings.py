@@ -49,6 +49,42 @@ def test_decoded_fields():
         assert len(chrom["time_sec"]) == len(chrom["intensity"])
 
 
+def test_record_fields_follow_core_4():
+    path = _fixture_path()
+    if not path.is_file():
+        if os.environ.get("REQUIRE_CORPUS") == "1":
+            pytest.fail(f"REQUIRE_CORPUS=1 but {path} is missing")
+        pytest.skip("set OPENSXRAW_CORPUS or OPENSXRAW_TEST_WIFF to a WIFF fixture")
+    reader = opensxraw.RawReader(str(path))
+    spectra = [reader.read_spectrum(i) for i in range(reader.scan_count)]
+    ms2 = next(s for s in spectra if s.ms_level >= 2 and s.precursor is not None)
+    precursor = ms2.precursor
+    # Collision energy is a list of {"value", "unit"} dicts. The file carries
+    # none, so the list is empty and the old scalar keys are gone.
+    assert precursor["collision_energies"] == []
+    assert "collision_energy" not in precursor
+    assert "ce_is_nce" not in precursor
+    assert set(precursor) == {
+        "target_mz",
+        "selected_mz",
+        "isolation_width",
+        "charge",
+        "intensity",
+        "collision_energies",
+        "precursor_native_id",
+        "activation",
+        "analyzer",
+        "ccs",
+    }
+    assert precursor["activation"] is None
+    # Labels come from Core's `as_str`.
+    assert ms2.analyzer == "tqms"
+    assert ms2.polarity == "positive"
+    # The file has no centroid/profile indicator, so the mode stays unknown.
+    assert ms2.scan_mode is None
+    assert isinstance(ms2.retention_time_sec, float)
+
+
 def test_unreadable_scan_blocks_raise(tmp_path):
     path = _fixture_path()
     if not path.is_file():
