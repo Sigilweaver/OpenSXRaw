@@ -12,8 +12,8 @@
 
 use openmassspec_core::conformance::assert_iter_invariants;
 use openmassspec_core::{
-    write_mzml_with_options, Analyzer, Check, Compression, Error as CoreError, Leniency, Polarity,
-    RecordProblem, SpectrumRecord, SpectrumSource, WriteOptions,
+    write_mzml_with_options, Analyzer, Check, Compression, Polarity, SpectrumRecord,
+    SpectrumSource, WriteOptions,
 };
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
@@ -351,14 +351,16 @@ fn calibrated_fixture_or_skip() -> Option<Reader> {
 }
 
 /// No decoded stream carries a scan mode or a collision energy, so every
-/// record leaves both unknown and the strict writer refuses the first one.
-/// Allowing `unknown_scan_mode` writes every spectrum and flags each with a
-/// warning.
+/// record leaves both unknown. The reader declares the scan mode unstated, so
+/// a default write converts every spectrum, flags each with an
+/// `unknown_scan_mode` warning and adds one run-level `unstated_by_source`
+/// warning. Without the declaration the same write is refused.
 #[test]
-fn test_unknown_scan_mode_is_strict_by_default_and_lenient_on_request() {
+fn test_unknown_scan_mode_converts_by_default_with_warnings() {
     let Some(mut reader) = open_fixture_or_skip() else {
         return;
     };
+    assert_eq!(reader.run_metadata().unstated, vec![Check::UnknownScanMode]);
     let spectra: Vec<_> = reader
         .iter_spectra()
         .collect::<openmassspec_core::Result<_>>()
@@ -382,29 +384,16 @@ fn test_unknown_scan_mode_is_strict_by_default_and_lenient_on_request() {
 
     let options = WriteOptions::new().with_compression(Compression::NoCompression);
     let mut reader = open_fixture_or_skip().expect("fixture present");
-    let err = write_mzml_with_options(&mut reader, &mut std::io::sink(), &options)
-        .expect_err("strict write must reject an unknown scan mode");
-    assert!(
-        matches!(
-            err,
-            CoreError::Record {
-                problem: RecordProblem::UnknownScanMode,
-                ..
-            }
-        ),
-        "unexpected error: {err}"
-    );
-
-    let lenient = options.with_leniency(Leniency::strict().with(Check::UnknownScanMode));
-    let mut reader = open_fixture_or_skip().expect("fixture present");
-    let summary = write_mzml_with_options(&mut reader, &mut std::io::sink(), &lenient)
-        .expect("lenient write failed");
+    let summary = write_mzml_with_options(&mut reader, &mut std::io::sink(), &options)
+        .expect("default write failed");
     assert_eq!(summary.spectra_written, spectra.len());
     assert_eq!(summary.spectra_skipped, 0);
+    assert!(summary.has_warnings());
     assert_eq!(
         summary.warning_counts.get("unknown_scan_mode"),
         Some(&spectra.len())
     );
+    assert_eq!(summary.warning_counts.get("unstated_by_source"), Some(&1));
 }
 
 #[test]

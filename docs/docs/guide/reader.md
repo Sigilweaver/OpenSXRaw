@@ -72,8 +72,9 @@ position in the `Idx` stream.
 - **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
   every spectrum. No decoded stream (`Idx`, `DDERealTimeDataEx`,
   `SummaryInformation`) carries a reliable per-scan or per-experiment
-  centroid/profile indicator. The mzML writer refuses such spectra unless
-  the `unknown_scan_mode` check is allowed (see [mzML export](./mzml-export)).
+  centroid/profile indicator. The reader declares the mode unstated, so the
+  mzML writer converts the file and marks each spectrum with an
+  `unknown_scan_mode` warning (see [mzML export](./mzml-export)).
 - **Collision energy and activation**: `collision_energies` is empty and
   `activation` is `None` on every precursor. Some methods store a static
   collision energy per Experiment in the method tree, but no stream links a scan to its

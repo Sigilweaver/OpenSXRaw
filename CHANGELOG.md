@@ -28,11 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python: enum labels come from Core's `as_str`. The only label that
   differs from 0.4.0 is `analyzer` `"tofms"`, now `"tof"`; it appears on
   `Spectrum.analyzer`, `precursor["analyzer"]` and `run_info()["analyzers"]`.
-- Writing mzML from this reader with default options now fails with check
-  `unknown_scan_mode`: the reader cannot tell centroid from profile data, so
-  `scan_mode` is unknown on every spectrum, and Core 4 rejects an unknown scan
-  mode instead of writing it as profile. Allow the check to write the file
-  (see Known issues in the README).
+- mzML written from this reader no longer labels its spectra profile. The
+  files never state profile or centroid, so `scan_mode` is unknown on every
+  spectrum; Core 3 wrote such spectra as profile (`MS:1000128`) and Core 4
+  writes neither term. The reader declares this once through
+  `RunMetadata::unstated` (`Check::UnknownScanMode`), so conversion succeeds
+  by default. Each spectrum carries an `unknown_scan_mode` warning and the run
+  one `unstated_by_source` warning, so `WriteSummary::has_warnings` is true
+  for every file (see Known issues in the README).
+- A scan block that decodes to no peaks carries the `empty_spectrum` warning
+  and declares no base peak or m/z range. None of the 261 public samples
+  checked has one.
 
 ## [0.4.0] - 2026-10-11
 

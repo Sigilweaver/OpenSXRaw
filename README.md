@@ -45,16 +45,14 @@ checks run on the public validation corpus (see [CORPUS.md](CORPUS.md)).
 - **MRM transitions are not reported.** QTRAP MRM spectra do not expose
   their Q1/Q3 transitions, and no SRM chromatograms are produced. Only a
   TIC chromatogram is available.
-- **mzML conversion fails by default.** No decoded stream says whether a
-  scan is centroid or profile, so every spectrum has `scan_mode` unknown.
-  `openmassspec-core` 4 refuses an unknown scan mode (check
-  `unknown_scan_mode`), so a default conversion stops at the first spectrum
-  in every file of the public corpus (QTRAP DDA, QTRAP MRM, TripleTOF and
-  SWATH alike). To convert anyway, allow the check: `--allow
-  unknown_scan_mode` on the `openmassspec` command line,
-  `Leniency::strict().with(Check::UnknownScanMode)` in Rust. The mzML then
-  has no profile or centroid term on its spectra, and each is marked with an
-  `unknown_scan_mode` warning.
+- **Scan mode is unknown on every spectrum.** No decoded stream says whether
+  a scan is centroid or profile. The reader declares this once
+  (`RunMetadata::unstated`), so mzML conversion succeeds by default. The
+  mzML has no profile or centroid term on its spectra, each spectrum carries
+  an `unknown_scan_mode` warning, and the run carries one
+  `unstated_by_source` warning, so `WriteSummary::has_warnings` is true for
+  every file. Centroiding with `Centroided` passes the spectra through
+  unchanged for the same reason.
 - **Collision energy and activation are not decoded.** `collision_energies`
   is empty and `activation` is `None` on every precursor (issue #23). Some
   methods store a collision energy per Experiment in the method tree, but no

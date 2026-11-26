@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use cfb::CompoundFile;
 use openmassspec_core::{
-    cv, Analyzer, ChromatogramIter, ChromatogramRecord, CvTerm, Polarity, PrecursorInfo,
-    RunMetadata, SpectrumIter, SpectrumRecord, SpectrumSource,
+    cv, Analyzer, Check, ChromatogramIter, ChromatogramRecord, CvTerm, Polarity, PrecursorInfo,
+    RunMetadata, SpectrumIter, SpectrumRecord, SpectrumSource, Warning, WarningKind,
 };
 
 use crate::raw::calibration::Calibration;
@@ -562,6 +562,11 @@ impl SpectrumSource for Reader {
         .with_instrument_serial_number(instrument_serial_number)
         .with_start_timestamp(self.start_timestamp.clone())
         .with_extra_map(extra)
+        // No decoded stream of a `.wiff` states profile or centroid, so
+        // `scan_mode` is unknown on every spectrum. The source says so once;
+        // the writer then converts by default and marks each spectrum
+        // `unknown_scan_mode`.
+        .with_unstated(Check::UnknownScanMode)
     }
 
     fn spectrum_count_hint(&self) -> Option<usize> {
@@ -750,7 +755,7 @@ impl SpectrumSource for Reader {
                     // corpus fixtures (e.g. SWATH cycles) that the value is
                     // identical across every Experiment within one file.
                     //
-                    // `scan_mode` is left unset: no decoded stream carries a
+                    // `scan_mode` is left unknown: no decoded stream carries a
                     // per-scan or per-experiment centroid/profile indicator.
                     // Ruled out: the Idx record's byte 0x11 ("Unknown", always
                     // 0x00 - see `raw::idx`), the 64 unidentified trailing
@@ -762,11 +767,11 @@ impl SpectrumSource for Reader {
                     // isolated peaks) is not used: there is no
                     // known-centroid/known-profile ground truth to validate
                     // it against, and the clean-room policy rules out
-                    // unverified guesses. `openmassspec_core`'s mzML writer
-                    // treats any `scan_mode` other than
-                    // `Some(ScanMode::Centroid)` (including `None`) as profile
-                    // spectrum (`MS:1000128`), so centroided acquisitions are
-                    // still labeled profile in mzML output.
+                    // unverified guesses. `run_metadata` declares the mode
+                    // unstated (`Check::UnknownScanMode`), so the writer
+                    // converts the file, writes no profile or centroid term
+                    // and marks each spectrum with an `unknown_scan_mode`
+                    // warning.
                     //
                     // `total_ion_current` is left unset: the Idx TIC is in cps
                     // (physically calibrated) and does not match
@@ -776,7 +781,8 @@ impl SpectrumSource for Reader {
                     //
                     // `faims_cv` is left unset: SCIEX instruments have no
                     // FAIMS interface.
-                    Ok(SpectrumRecord::new(idx, scan_number, native_id)
+                    let empty = mz.is_empty();
+                    let record = SpectrumRecord::new(idx, scan_number, native_id)
                         .with_ms_level(rec.ms_level)
                         .with_polarity(polarity)
                         .with_analyzer(analyzer)
@@ -785,7 +791,17 @@ impl SpectrumSource for Reader {
                         .with_peaks(mz, intensity)
                         .with_extra("opensxraw.idx_tic_cps", rec.tic.to_string())
                         .with_extra("opensxraw.scan_offset", rec.scan_offset.to_string())
-                        .with_extra("opensxraw.scan_size", rec.scan_size.to_string()))
+                        .with_extra("opensxraw.scan_size", rec.scan_size.to_string());
+                    // A block that decodes to no peaks is flagged on the
+                    // record; base peak and m/z range stay undeclared.
+                    Ok(if empty {
+                        record.with_warning(Warning::new(
+                            WarningKind::EmptySpectrum,
+                            "the scan block decodes to no peaks",
+                        ))
+                    } else {
+                        record
+                    })
                 },
             );
 
@@ -959,6 +975,30 @@ mod tests {
                 spectrum.scan_mode.is_none(),
                 "scan_mode must be None, not an unverified guess"
             );
+        }
+    }
+
+    #[test]
+    fn run_metadata_declares_scan_mode_unstated_and_nothing_else() {
+        let reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        assert_eq!(reader.run_metadata().unstated, vec![Check::UnknownScanMode]);
+    }
+
+    #[test]
+    fn empty_scan_block_carries_the_empty_spectrum_warning_and_no_range() {
+        // `reader_with_idx` blocks all decode to zero points.
+        let mut reader = reader_with_idx(vec![idx_record(0.0, 1, 100.0)]);
+        let spectra = collect_spectra(&mut reader);
+        assert_eq!(spectra.len(), 1);
+        for s in &spectra {
+            assert!(s.mz.is_empty());
+            assert!(s
+                .warnings
+                .iter()
+                .any(|w| w.kind == WarningKind::EmptySpectrum));
+            assert_eq!(s.base_peak_mz, None);
+            assert_eq!(s.low_mz, None);
+            assert_eq!(s.high_mz, None);
         }
     }
 
