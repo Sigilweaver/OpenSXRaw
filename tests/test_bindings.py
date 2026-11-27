@@ -85,6 +85,26 @@ def test_record_fields_follow_core_4():
     assert isinstance(ms2.retention_time_sec, float)
 
 
+def test_spectrum_warnings_field():
+    """`warnings` lists what the reader flagged on a spectrum, as code and message."""
+    path = _fixture_path()
+    if not path.is_file():
+        if os.environ.get("REQUIRE_CORPUS") == "1":
+            pytest.fail(f"REQUIRE_CORPUS=1 but {path} is missing")
+        pytest.skip("set OPENSXRAW_CORPUS or OPENSXRAW_TEST_WIFF to a WIFF fixture")
+    reader = opensxraw.RawReader(str(path))
+    for i in range(reader.scan_count):
+        spectrum = reader.read_spectrum(i)
+        warnings = spectrum.warnings
+        assert isinstance(warnings, list)
+        for warning in warnings:
+            assert set(warning) == {"code", "message"}
+            assert warning["code"] and warning["message"]
+        # A spectrum with no peaks is flagged, so none goes unmarked.
+        if len(spectrum) == 0:
+            assert "empty_spectrum" in {w["code"] for w in warnings}
+
+
 def test_unreadable_scan_blocks_raise(tmp_path):
     path = _fixture_path()
     if not path.is_file():

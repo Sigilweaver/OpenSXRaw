@@ -51,6 +51,7 @@ for i in range(reader.scan_count):
 | `analyzer`            | `str \| None` | `"tqms"` (QTRAP) or `"tof"` (TripleTOF, ZenoTOF) |
 | `scan_mode`           | `str \| None` | Always `None`: the file does not say |
 | `precursor`           | `dict \| None` | MS2+ only, see below                 |
+| `warnings`            | `list[dict]`  | What the reader flagged on this spectrum, each `{"code", "message"}`; empty when nothing was |
 
 `precursor` has the keys `target_mz`, `selected_mz`, `isolation_width`,
 `charge`, `intensity`, `collision_energies`, `precursor_native_id`,
@@ -58,6 +59,10 @@ for i in range(reader.scan_count):
 `{"value": float, "unit": "ev" | "nce" | None}` dicts; it is empty
 because the file's scan data carries no collision energy. Labels are
 Core's `as_str` labels.
+
+`warnings` is empty for a spectrum decoded as stored. A scan block that
+decodes to no peaks has an `empty_spectrum` entry; it also has no base peak
+or m/z range.
 
 `len(spectrum)` returns the peak count. m/z on TripleTOF/ZenoTOF files
 comes from a per-file linear calibration and is not accurate; on QTRAP

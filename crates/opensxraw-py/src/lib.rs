@@ -227,6 +227,19 @@ impl Spectrum {
     fn extra(&self) -> BTreeMap<String, String> {
         self.rec.extra.clone()
     }
+    /// Warnings the reader attached to this spectrum, as `{"code",
+    /// "message"}` dicts. Empty when the spectrum is as decoded.
+    #[getter]
+    fn warnings<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let out = PyList::empty(py);
+        for w in &self.rec.warnings {
+            let d = PyDict::new(py);
+            d.set_item("code", w.kind.code())?;
+            d.set_item("message", &w.message)?;
+            out.append(d)?;
+        }
+        Ok(out)
+    }
 
     fn __len__(&self) -> usize {
         self.rec.mz.len()
