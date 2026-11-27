@@ -11,7 +11,10 @@
 //! TripleTOF fixture for the calibrated-m/z path.
 
 use openmassspec_core::conformance::assert_iter_invariants;
-use openmassspec_core::{Analyzer, Polarity, SpectrumRecord, SpectrumSource};
+use openmassspec_core::{
+    write_mzml_with_options, Analyzer, Check, Compression, Polarity, SpectrumRecord,
+    SpectrumSource, WriteOptions,
+};
 use opensxraw::reader::Reader;
 use std::path::PathBuf;
 
@@ -247,7 +250,7 @@ fn test_ms1_has_peaks() {
     println!(
         "First MS1 with peaks: scan={} rt={:.2}s peaks={}",
         first.scan_number,
-        first.retention_time_sec,
+        first.retention_time_sec.expect("retention time"),
         first.mz.len()
     );
     assert_eq!(
@@ -345,6 +348,52 @@ fn calibrated_fixture_or_skip() -> Option<Reader> {
         return None;
     }
     Some(Reader::open(&path).expect("Reader::open failed"))
+}
+
+/// No decoded stream carries a scan mode or a collision energy, so every
+/// record leaves both unknown. The reader declares the scan mode unstated, so
+/// a default write converts every spectrum, flags each with an
+/// `unknown_scan_mode` warning and adds one run-level `unstated_by_source`
+/// warning. Without the declaration the same write is refused.
+#[test]
+fn test_unknown_scan_mode_converts_by_default_with_warnings() {
+    let Some(mut reader) = open_fixture_or_skip() else {
+        return;
+    };
+    assert_eq!(reader.run_metadata().unstated, vec![Check::UnknownScanMode]);
+    let spectra: Vec<_> = reader
+        .iter_spectra()
+        .collect::<openmassspec_core::Result<_>>()
+        .expect("iter_spectra yielded an error");
+    assert!(!spectra.is_empty());
+    for s in &spectra {
+        assert_eq!(
+            s.scan_mode, None,
+            "{}: scan mode must stay unknown",
+            s.native_id
+        );
+        if let Some(p) = &s.precursor {
+            assert!(
+                p.collision_energies.is_empty(),
+                "{}: collision energy must stay unknown",
+                s.native_id
+            );
+            assert_eq!(p.activation, None);
+        }
+    }
+
+    let options = WriteOptions::new().with_compression(Compression::NoCompression);
+    let mut reader = open_fixture_or_skip().expect("fixture present");
+    let summary = write_mzml_with_options(&mut reader, &mut std::io::sink(), &options)
+        .expect("default write failed");
+    assert_eq!(summary.spectra_written, spectra.len());
+    assert_eq!(summary.spectra_skipped, 0);
+    assert!(summary.has_warnings());
+    assert_eq!(
+        summary.warning_counts.get("unknown_scan_mode"),
+        Some(&spectra.len())
+    );
+    assert_eq!(summary.warning_counts.get("unstated_by_source"), Some(&1));
 }
 
 #[test]

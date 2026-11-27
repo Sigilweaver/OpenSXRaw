@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
+### Breaking
+
+- Python: the minimum version is 3.10 (`requires-python = ">=3.10"`, one abi3
+  wheel per platform built for 3.10, see
+  [SUPPORT.md](https://github.com/Sigilweaver/ops/blob/main/SUPPORT.md)).
+- Adopts `openmassspec-core` 4.0. Rust callers see Core's changes in the types
+  this crate returns: `SpectrumRecord::retention_time_sec` is
+  `Option<f64>` (this reader always sets it), and
+  `PrecursorInfo::collision_energy` and `ce_is_nce` are replaced by the
+  `collision_energies` list (always empty here, see Known issues).
+  Migration notes:
+  [MIGRATING-4.0.md](https://github.com/Sigilweaver/OpenMassSpecCore/blob/main/MIGRATING-4.0.md)
+  in OpenMassSpecCore.
+- Python: `Spectrum.precursor` has a `collision_energies` list of
+  `{"value", "unit"}` dicts in place of the `collision_energy` and
+  `ce_is_nce` keys. The list is empty because the file's scan data carries no
+  collision energy.
+- Python: `Spectrum.retention_time_sec` is `float | None`.
+- Python: enum labels come from Core's `as_str`. The only label that
+  differs from 0.4.0 is `analyzer` `"tofms"`, now `"tof"`; it appears on
+  `Spectrum.analyzer`, `precursor["analyzer"]` and `run_info()["analyzers"]`.
+
+### Changed
+
+- mzML written from this reader no longer labels its spectra profile. The
+  files never state profile or centroid, so `scan_mode` is unknown on every
+  spectrum; Core 3 wrote such spectra as profile (`MS:1000128`) and Core 4
+  writes neither term. The reader declares this once through
+  `RunMetadata::unstated` (`Check::UnknownScanMode`), so conversion succeeds
+  by default. Each spectrum carries an `unknown_scan_mode` warning and the run
+  one `unstated_by_source` warning, so `WriteSummary::has_warnings` is true
+  for every file (see Known issues in the README).
+- A scan block that decodes to no peaks carries the `empty_spectrum` warning
+  and declares no base peak or m/z range. None of the 261 public samples
+  checked has one.
+
+### Added
+
+- Python: `Spectrum.warnings` lists what the reader flagged on a spectrum as
+  `{"code", "message"}` dicts, so an `empty_spectrum` is visible from Python.
+
 ## [0.4.0] - 2026-10-11
 
 ### Breaking

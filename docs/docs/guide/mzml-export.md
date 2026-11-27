@@ -19,6 +19,23 @@ let summary = write_mzml(&mut reader, &mut out)?;
 println!("{} spectra written", summary.spectra_written);
 ```
 
+No `.wiff` stream says whether a scan is centroid or profile, so every
+spectrum has `scan_mode` unknown. The reader declares this once in its run
+metadata (`RunMetadata::unstated` holds `Check::UnknownScanMode`), so the
+default `write_mzml` converts the file. Each spectrum carries an
+`unknown_scan_mode` warning, the mzML has no profile or centroid term on its
+spectra, and the run gets one `unstated_by_source` warning. The summary
+reports them:
+
+```rust
+assert!(summary.has_warnings());
+println!("{:?}", summary.warning_counts);
+// {"unknown_scan_mode": 2228, "unstated_by_source": 1}
+```
+
+A spectrum whose scan block decodes to no peaks carries the `empty_spectrum`
+warning and declares no base peak or m/z range.
+
 `write_mzml` stops at the first spectrum that fails to decode and returns
 that error. To write the readable spectra and skip the rest, use
 `write_mzml_with_options` with `RecordErrorPolicy::Skip` and report the

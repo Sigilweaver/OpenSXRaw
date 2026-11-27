@@ -35,9 +35,9 @@ for spectrum in reader.iter_spectra() {
 ```
 
 Each yielded `SpectrumRecord` carries `index`, `scan_number`, `native_id`,
-`ms_level`, `retention_time_sec`, `analyzer`, `polarity`, and
-`mz`/`intensity` arrays. Native IDs use the PSI-MS "scan number only
-nativeID format" (`MS:1000776`): `scan=N`, where `N` is the 1-based
+`ms_level`, `retention_time_sec` (an `Option<f64>`, always `Some`), `analyzer`,
+`polarity`, and `mz`/`intensity` arrays. Native IDs use the PSI-MS "scan number
+only nativeID format" (`MS:1000776`): `scan=N`, where `N` is the 1-based
 position in the `Idx` stream.
 
 - **m/z**: on TripleTOF/ZenoTOF files the raw time-bin values are converted
@@ -72,7 +72,13 @@ position in the `Idx` stream.
 - **Centroid/profile scan mode**: `scan_mode` is left unset (`None`) on
   every spectrum. No decoded stream (`Idx`, `DDERealTimeDataEx`,
   `SummaryInformation`) carries a reliable per-scan or per-experiment
-  centroid/profile indicator.
+  centroid/profile indicator. The reader declares the mode unstated, so the
+  mzML writer converts the file and marks each spectrum with an
+  `unknown_scan_mode` warning (see [mzML export](./mzml-export)).
+- **Collision energy and activation**: `collision_energies` is empty and
+  `activation` is `None` on every precursor. Some methods store a static
+  collision energy per Experiment in the method tree, but no stream links a scan to its
+  Experiment (issue #7) and the file states no unit, so none is reported.
 
 `iter_spectra` yields `openmassspec_core::Result<SpectrumRecord>` items.
 If a scan block cannot be read from the `.wiff.scan` file (an I/O error,
