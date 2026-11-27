@@ -56,17 +56,15 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Download corpus fixture for conformance tests
-        shell: bash
-        run: |
-          mkdir -p corpus/PXD022088
-          curl -fsSL --retry 3 --user-agent "OpenSXRaw-CI/1.0" \
-            -o corpus/PXD022088/Rcor2KOESC1.wiff \
-            "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff"
-          curl -fsSL --retry 3 --user-agent "OpenSXRaw-CI/1.0" \
-            -o corpus/PXD022088/Rcor2KOESC1.wiff.scan \
-            "https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff.scan"
-          echo "Downloaded $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff | cut -f1) .wiff + $(du -sh corpus/PXD022088/Rcor2KOESC1.wiff.scan | cut -f1) .wiff.scan"
+      - name: Fetch corpus fixture for conformance tests
+        timeout-minutes: 20
+        uses: Sigilweaver/ops/.github/actions/fetch-fixture@cf88ab9d4e06ce360ee0659bde8d10081ea4de17
+        with:
+          destination: corpus/PXD022088
+          user-agent: OpenSXRaw-CI/1.0
+          fixtures: |
+            Rcor2KOESC1.wiff 4bf72aca02862240640af9979a739ec9bfd55053e52ff87cadbe75f10d4a29fe https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff https://ftp.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff
+            Rcor2KOESC1.wiff.scan 95ba688543dc9ad81fff0758dc9833d113b7bb0e2b266944e9a363b58a00c20f https://ftp.pride.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff.scan https://ftp.ebi.ac.uk/pride/data/archive/2020/12/PXD022088/Rcor2KOESC1.wiff.scan
 
       - name: cargo test
         env:
