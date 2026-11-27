@@ -62,7 +62,8 @@ Core's `as_str` labels.
 
 `warnings` is empty for a spectrum decoded as stored. A scan block that
 decodes to no peaks has an `empty_spectrum` entry; it also has no base peak
-or m/z range.
+or m/z range. `unknown_scan_mode` and `unstated_by_source` are not listed
+here: the mzML writer adds them to its output, not the reader to the record.
 
 `len(spectrum)` returns the peak count. m/z on TripleTOF/ZenoTOF files
 comes from a per-file linear calibration and is not accurate; on QTRAP

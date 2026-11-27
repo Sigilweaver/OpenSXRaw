@@ -100,7 +100,9 @@ def test_spectrum_warnings_field():
         for warning in warnings:
             assert set(warning) == {"code", "message"}
             assert warning["code"] and warning["message"]
-        # A spectrum with no peaks is flagged, so none goes unmarked.
+        # A spectrum with no peaks is flagged, so none goes unmarked. The public
+        # fixture has no empty scan block, so this branch and the loop above only
+        # run on other files; the Rust unit test covers the flag on the record.
         if len(spectrum) == 0:
             assert "empty_spectrum" in {w["code"] for w in warnings}
 
