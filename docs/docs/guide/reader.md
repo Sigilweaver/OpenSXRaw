@@ -35,9 +35,9 @@ for spectrum in reader.iter_spectra() {
 ```
 
 Each yielded `SpectrumRecord` carries `index`, `scan_number`, `native_id`,
-`ms_level`, `retention_time_sec` (an `Option<f64>`, always `Some`), `analyzer`, `polarity`, and
-`mz`/`intensity` arrays. Native IDs use the PSI-MS "scan number only
-nativeID format" (`MS:1000776`): `scan=N`, where `N` is the 1-based
+`ms_level`, `retention_time_sec` (an `Option<f64>`, always `Some`), `analyzer`,
+`polarity`, and `mz`/`intensity` arrays. Native IDs use the PSI-MS "scan number
+only nativeID format" (`MS:1000776`): `scan=N`, where `N` is the 1-based
 position in the `Idx` stream.
 
 - **m/z**: on TripleTOF/ZenoTOF files the raw time-bin values are converted
