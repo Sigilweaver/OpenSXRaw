@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
 - Python: the minimum version is 3.10 (`requires-python = ">=3.10"`, one abi3
   wheel per platform built for 3.10, see
@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python: enum labels come from Core's `as_str`. The only label that
   differs from 0.4.0 is `analyzer` `"tofms"`, now `"tof"`; it appears on
   `Spectrum.analyzer`, `precursor["analyzer"]` and `run_info()["analyzers"]`.
+
+### Changed
+
 - mzML written from this reader no longer labels its spectra profile. The
   files never state profile or centroid, so `scan_mode` is unknown on every
   spectrum; Core 3 wrote such spectra as profile (`MS:1000128`) and Core 4
@@ -39,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A scan block that decodes to no peaks carries the `empty_spectrum` warning
   and declares no base peak or m/z range. None of the 261 public samples
   checked has one.
+
+### Added
+
+- Python: `Spectrum.warnings` lists what the reader flagged on a spectrum as
+  `{"code", "message"}` dicts, so an `empty_spectrum` is visible from Python.
 
 ## [0.4.0] - 2026-10-11
 
