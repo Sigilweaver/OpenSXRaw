@@ -29,3 +29,7 @@ keywords:
   - wiff
   - bioinformatics
   - Rust
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24585903"
+    description: "Zenodo concept DOI (resolves to the latest archived version)"

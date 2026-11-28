@@ -1,6 +1,7 @@
 # OpenSXRaw
 
 [![CI](https://github.com/Sigilweaver/OpenSXRaw/actions/workflows/ci.yml/badge.svg)](https://github.com/Sigilweaver/OpenSXRaw/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24585903.svg)](https://doi.org/10.5281/zenodo.24585903)
 [![crates.io](https://img.shields.io/crates/v/opensxraw.svg)](https://crates.io/crates/opensxraw)
 [![PyPI](https://img.shields.io/pypi/v/opensxraw.svg)](https://pypi.org/project/opensxraw/)
 [![docs.rs](https://img.shields.io/docsrs/opensxraw)](https://docs.rs/opensxraw)
