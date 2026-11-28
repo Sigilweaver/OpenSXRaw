@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `CITATION.cff` identifies the Zenodo concept DOI (10.5281/zenodo.24585903),
+  which resolves to the latest archived version, and the README carries a DOI
+  badge for it.
+
 ## [0.5.0] - 2026-11-27
 
 ### Breaking
